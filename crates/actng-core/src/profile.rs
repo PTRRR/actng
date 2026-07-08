@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::discover::FileImport;
 use crate::error::Error;
 use crate::import::ImportProfile;
 use crate::tagger::{Suggestion, Tagger};
@@ -20,6 +22,22 @@ pub struct Tag {
     pub name: String,
     pub category: Option<String>,
     pub description: Option<String>,
+}
+
+/// A transaction that the tagger could not confidently label.
+#[derive(Debug)]
+pub struct Review<'a> {
+    pub entry: &'a crate::entry::Entry,
+    pub candidates: Vec<(String, f64)>,
+}
+
+/// The total result of applying a `Profile` to a set of imports.
+#[derive(Debug)]
+pub struct RunResult<'a> {
+    pub tagged: Vec<(&'a crate::entry::Entry, Suggestion)>,
+    pub review: Vec<Review<'a>>,
+    pub sources: Vec<PathBuf>,
+    pub duplicates_dropped: usize,
 }
 
 /// Everything the user has taught the tool, in one serializable artifact:
@@ -120,6 +138,60 @@ impl Profile {
     pub fn remove_tag(&mut self, tag: &str) {
         self.tags.retain(|t| t.name != tag);
         self.tagger.remove_tag(tag);
+    }
+
+    /// Apply the profile's tagger to a set of imports, partitioning results into
+    /// confident matches and those needing human review.
+    pub fn run<'a>(&self, imports: &'a [FileImport]) -> RunResult<'a> {
+        let mut sources = Vec::new();
+        let mut all_refs = Vec::new();
+        for imp in imports {
+            if let Ok(import) = &imp.result {
+                all_refs.extend(import.entries.iter());
+                sources.push(imp.path.clone());
+            }
+        }
+
+        use std::collections::HashSet;
+        use crate::normalize::normalize;
+        
+        let mut seen = HashSet::new();
+        let mut unique = Vec::new();
+        let mut dropped = 0;
+
+        for entry in all_refs {
+            let key = (
+                entry.date,
+                normalize(&entry.description).key,
+                entry.amount.map(|a| (a * 100.0).round() as i64),
+            );
+            if seen.insert(key) {
+                unique.push(entry);
+            } else {
+                dropped += 1;
+            }
+        }
+
+        let mut tagged = Vec::new();
+        let mut review = Vec::new();
+
+        for entry in unique {
+            if let Some(sugg) = self.suggest(&entry.description) {
+                tagged.push((entry, sugg));
+            } else {
+                review.push(Review {
+                    entry,
+                    candidates: self.candidates(&entry.description),
+                });
+            }
+        }
+
+        RunResult {
+            tagged,
+            review,
+            sources,
+            duplicates_dropped: dropped,
+        }
     }
 }
 

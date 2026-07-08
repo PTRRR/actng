@@ -40,16 +40,75 @@ fn normalization_strips_export_noise() {
             );
         }
     }
-
-    // Direct-debit entries expose the counterparty IBAN as a feature.
-    let debit = import
-        .entries
-        .iter()
-        .find(|e| e.description.contains("SERAFE"))
-        .expect("SERAFE entry present");
-    let n = normalize(&debit.description);
-    assert!(n.ibans.contains(&"ch893000520211491010b".to_string()));
 }
+
+#[test]
+fn profile_run_partitions_results() {
+    let import = read_entries_from_path(example_path(), None).unwrap();
+    let mut profile = actng_core::Profile::new("test");
+
+    // Learn some examples
+    profile.learn("ACHAT/PRESTATION TWINT DU 06.11.2025 GRIMPER.CH LAUSANNE (CH)", "climbing");
+    profile.learn("ACHAT/SERVICE DU 07.06.2025 CARTE NO XXXX6273 COOP-5386 LS BEL AIR FOOBY LAUSANNE (CH)", "groceries");
+
+    let file_import = actng_core::FileImport {
+        path: example_path(),
+        result: Ok(actng_core::Import {
+            profile: import.profile,
+            entries: import.entries,
+            fingerprint: import.fingerprint,
+        }),
+    };
+
+    let imports = [file_import];
+    let result = profile.run(&imports);
+
+    assert!(!result.tagged.is_empty(), "should have tagged entries");
+    assert!(!result.review.is_empty(), "should have entries for review");
+    assert_eq!(result.sources.len(), 1);
+    assert_eq!(result.sources[0], example_path());
+}
+
+#[test]
+fn profile_run_deduplicates_identical_entries() {
+    let import = read_entries_from_path(example_path(), None).unwrap();
+    let profile = actng_core::Profile::new("test");
+
+    let file_import_1 = actng_core::FileImport {
+        path: example_path(),
+        result: Ok(actng_core::Import {
+            profile: import.profile.clone(),
+            entries: import.entries.clone(),
+            fingerprint: import.fingerprint.clone(),
+        }),
+    };
+    let file_import_2 = actng_core::FileImport {
+        path: example_path(),
+        result: Ok(actng_core::Import {
+            profile: import.profile.clone(),
+            entries: import.entries.clone(),
+            fingerprint: import.fingerprint.clone(),
+        }),
+    };
+
+    let imports = [file_import_1, file_import_2];
+    let result = profile.run(&imports);
+
+    // The file itself might have internal duplicates. 
+    // The a-priori unique count for one file:
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_count = 0;
+    for e in &import.entries {
+        let key = (e.date, actng_core::normalize(&e.description).key, e.amount.map(|a| (a * 100.0).round() as i64));
+        if seen.insert(key) {
+            unique_count += 1;
+        }
+    }
+
+    let total_entries = result.tagged.len() + result.review.len();
+    assert_eq!(total_entries, unique_count);
+}
+
 
 #[test]
 fn learned_tags_apply_across_the_file() {

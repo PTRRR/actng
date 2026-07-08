@@ -31,15 +31,17 @@
 //! # Ok::<(), actng_core::Error>(())
 //! ```
 
-mod bayes;
-mod entry;
-mod error;
-mod import;
-mod normalize;
-mod profile;
-mod tagger;
+pub mod bayes;
+pub mod discover;
+pub mod entry;
+pub mod error;
+pub mod import;
+pub mod normalize;
+pub mod profile;
+pub mod tagger;
 
 pub use bayes::NaiveBayes;
+pub use discover::{deduplicate, discover, import_dir, FileImport};
 pub use entry::Entry;
 pub use error::Error;
 pub use import::{

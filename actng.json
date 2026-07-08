@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "name": "my-profile",
+  "tags": [
+    {
+      "name": "rent",
+      "category": null,
+      "description": null
+    }
+  ],
+  "tagger": {
+    "exact": {},
+    "bayes": {
+      "doc_counts": {},
+      "token_counts": {},
+      "tag_token_totals": {},
+      "vocab": [],
+      "total_docs": 0
+    },
+    "min_confidence": 0.8
+  },
+  "layouts": {}
+}
