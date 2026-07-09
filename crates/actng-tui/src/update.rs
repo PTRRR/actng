@@ -81,6 +81,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
         Screen::Entries => handle_entries_key(app, key),
         Screen::Tags => handle_tags_key(app, key),
         Screen::Files => handle_files_key(app, key),
+        Screen::Summary => vec![],
     }
 }
 
@@ -515,7 +516,12 @@ mod tests {
     use super::*;
 
     fn entry(desc: &str, amount: f64) -> Entry {
-        Entry { date: None, description: desc.to_string(), amount: Some(amount), raw: vec![] }
+        Entry {
+            date: None,
+            description: desc.to_string(),
+            amount: Some(amount),
+            raw: vec![],
+        }
     }
 
     fn test_app(entries: Vec<Entry>) -> App {
@@ -526,7 +532,13 @@ mod tests {
             sources: vec![PathBuf::from("test.csv")],
             failures: vec![],
         };
-        App::new(Profile::new("test"), PathBuf::from("test-profile.json"), PathBuf::from("."), dataset, vec![])
+        App::new(
+            Profile::new("test"),
+            PathBuf::from("test-profile.json"),
+            PathBuf::from("."),
+            dataset,
+            vec![],
+        )
     }
 
     fn key(c: char) -> KeyEvent {
@@ -556,14 +568,21 @@ mod tests {
         app.screen = Screen::Review;
 
         let queue = app.review_queue();
-        assert_eq!(queue.len(), 1, "ambiguous entry needs review, not a confident guess");
+        assert_eq!(
+            queue.len(),
+            1,
+            "ambiguous entry needs review, not a confident guess"
+        );
         let entry_idx = queue[0];
         let top_tag = app.profile.candidates("alpha")[0].0.clone();
 
         let cmds = update(&mut app, Msg::Key(key('1')));
         assert!(matches!(cmds.as_slice(), [Cmd::SaveProfile]));
         assert_eq!(app.profile.suggest("alpha").unwrap().tag, top_tag);
-        assert!(!app.review_queue().contains(&entry_idx), "confirmed entry leaves the queue");
+        assert!(
+            !app.review_queue().contains(&entry_idx),
+            "confirmed entry leaves the queue"
+        );
         assert_eq!(app.undo.len(), 1);
     }
 
@@ -572,11 +591,19 @@ mod tests {
         let mut app = test_app(vec![entry("COOP LAUSANNE", -1.0)]);
         app.screen = Screen::Tags;
         update(&mut app, Msg::Key(key('2')));
-        assert_eq!(app.screen, Screen::Review, "outside Review, digits still switch screens");
+        assert_eq!(
+            app.screen,
+            Screen::Review,
+            "outside Review, digits still switch screens"
+        );
 
         // Now inside Review, '1' with no candidates is a no-op, not a screen switch.
         update(&mut app, Msg::Key(key('1')));
-        assert_eq!(app.screen, Screen::Review, "inside Review, digits are confirm shortcuts, not switches");
+        assert_eq!(
+            app.screen,
+            Screen::Review,
+            "inside Review, digits are confirm shortcuts, not switches"
+        );
     }
 
     #[test]
@@ -595,19 +622,28 @@ mod tests {
         app.screen = Screen::Review;
 
         update(&mut app, Msg::Key(key('1')));
-        assert!(app.profile.suggest("alpha").is_some(), "confirming should have produced an exact match");
+        assert!(
+            app.profile.suggest("alpha").is_some(),
+            "confirming should have produced an exact match"
+        );
 
         let cmds = update(&mut app, Msg::Key(key('u')));
         assert!(matches!(cmds.as_slice(), [Cmd::SaveProfile]));
-        assert!(app.profile.suggest("alpha").is_none(), "undo removes the exact match again");
+        assert!(
+            app.profile.suggest("alpha").is_none(),
+            "undo removes the exact match again"
+        );
         assert!(app.undo.is_empty());
     }
 
     #[test]
     fn confirming_a_merchant_auto_resolves_siblings_with_the_same_key() {
-        let mut app =
-            test_app(vec![entry("ACHAT TWINT DU 01.01.2025 GRIMPER.CH LAUSANNE", -10.0), entry("ACHAT TWINT DU 02.02.2025 GRIMPER.CH LAUSANNE", -12.0)]);
-        app.profile.learn("SOME OTHER BOOTSTRAP TOKEN CLIMBING", "climbing");
+        let mut app = test_app(vec![
+            entry("ACHAT TWINT DU 01.01.2025 GRIMPER.CH LAUSANNE", -10.0),
+            entry("ACHAT TWINT DU 02.02.2025 GRIMPER.CH LAUSANNE", -12.0),
+        ]);
+        app.profile
+            .learn("SOME OTHER BOOTSTRAP TOKEN CLIMBING", "climbing");
         app.recompute();
         app.screen = Screen::Review;
         assert_eq!(app.review_queue().len(), 2);
@@ -617,10 +653,16 @@ mod tests {
         let before = app.review_queue();
         let rec = actions::confirm_tag(&mut app, entry_idx, "climbing").unwrap();
         let after = app.review_queue();
-        let resolved = before.iter().filter(|&&i| i != entry_idx && !after.contains(&i)).count();
+        let resolved = before
+            .iter()
+            .filter(|&&i| i != entry_idx && !after.contains(&i))
+            .count();
 
         assert_eq!(rec.description, desc);
-        assert_eq!(resolved, 1, "the sibling with the same normalized key should resolve too");
+        assert_eq!(
+            resolved, 1,
+            "the sibling with the same normalized key should resolve too"
+        );
         assert_eq!(after.len(), 0);
     }
 
@@ -634,12 +676,19 @@ mod tests {
 
         update(&mut app, Msg::Key(key('a')));
         assert!(app.review_all);
-        assert_eq!(app.review_queue().len(), 1, "retag mode surfaces every entry");
+        assert_eq!(
+            app.review_queue().len(),
+            1,
+            "retag mode surfaces every entry"
+        );
     }
 
     #[test]
     fn entries_filter_cycles_through_all_tagged_review_and_per_tag() {
-        let mut app = test_app(vec![entry("COOP LAUSANNE", -1.0), entry("UNKNOWN MERCHANT", -2.0)]);
+        let mut app = test_app(vec![
+            entry("COOP LAUSANNE", -1.0),
+            entry("UNKNOWN MERCHANT", -2.0),
+        ]);
         app.profile.learn("COOP LAUSANNE", "groceries");
         app.recompute();
         app.screen = Screen::Entries;
@@ -650,7 +699,10 @@ mod tests {
         update(&mut app, Msg::Key(key('f')));
         assert_eq!(app.entries_filter, EntryFilter::Review);
         update(&mut app, Msg::Key(key('f')));
-        assert_eq!(app.entries_filter, EntryFilter::Tag("groceries".to_string()));
+        assert_eq!(
+            app.entries_filter,
+            EntryFilter::Tag("groceries".to_string())
+        );
         update(&mut app, Msg::Key(key('f')));
         assert_eq!(app.entries_filter, EntryFilter::All);
     }
@@ -686,7 +738,10 @@ mod tests {
         let cmds = update(&mut app, Msg::Key(keycode(KeyCode::Enter)));
         assert!(matches!(cmds.as_slice(), [Cmd::SaveProfile]));
         assert!(app.modal.is_none());
-        assert_eq!(app.profile.suggest("SOME NEW MERCHANT").unwrap().tag, "sport");
+        assert_eq!(
+            app.profile.suggest("SOME NEW MERCHANT").unwrap().tag,
+            "sport"
+        );
         assert!(app.profile.tags.iter().any(|t| t.name == "sport"));
     }
 
@@ -724,16 +779,22 @@ mod tests {
     fn export_form_toggles_field_and_summary_flag() {
         let mut app = test_app(vec![entry("COOP LAUSANNE", -1.0)]);
         update(&mut app, Msg::Key(key('e')));
-        let Some(Modal::ExportForm(form)) = &app.modal else { panic!("expected export form") };
+        let Some(Modal::ExportForm(form)) = &app.modal else {
+            panic!("expected export form")
+        };
         assert_eq!(form.field, ExportField::Path);
         assert!(form.summary);
 
         update(&mut app, Msg::Key(keycode(KeyCode::Tab)));
-        let Some(Modal::ExportForm(form)) = &app.modal else { panic!("expected export form") };
+        let Some(Modal::ExportForm(form)) = &app.modal else {
+            panic!("expected export form")
+        };
         assert_eq!(form.field, ExportField::Summary);
 
         update(&mut app, Msg::Key(key(' ')));
-        let Some(Modal::ExportForm(form)) = &app.modal else { panic!("expected export form") };
+        let Some(Modal::ExportForm(form)) = &app.modal else {
+            panic!("expected export form")
+        };
         assert!(!form.summary, "space toggles the checkbox off");
 
         let cmds = update(&mut app, Msg::Key(keycode(KeyCode::Enter)));

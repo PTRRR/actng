@@ -24,10 +24,11 @@ pub enum Screen {
     Entries,
     Tags,
     Files,
+    Summary,
 }
 
 impl Screen {
-    pub const ALL: [Screen; 5] = [Screen::Overview, Screen::Review, Screen::Entries, Screen::Tags, Screen::Files];
+    pub const ALL: [Screen; 6] = [Screen::Overview, Screen::Review, Screen::Entries, Screen::Tags, Screen::Files, Screen::Summary];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -36,6 +37,7 @@ impl Screen {
             Screen::Entries => "Entries",
             Screen::Tags => "Tags",
             Screen::Files => "Files",
+            Screen::Summary => "Summary",
         }
     }
 }

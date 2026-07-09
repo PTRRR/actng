@@ -29,6 +29,7 @@ pub fn view(app: &App, frame: &mut Frame) {
         Screen::Entries => screens::entries::render(app, frame, chunks[1]),
         Screen::Tags => screens::tags::render(app, frame, chunks[1]),
         Screen::Files => screens::files::render(app, frame, chunks[1]),
+        Screen::Summary => screens::summary::render(app, frame, chunks[1]),
     }
 
     render_status_bar(app, frame, chunks[2]);
