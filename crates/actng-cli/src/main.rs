@@ -226,43 +226,64 @@ fn main() -> anyhow::Result<()> {
                 for (j, (tag, conf)) in item.candidates.iter().enumerate() {
                     println!("  {}. {:<15} ({:.2})", j + 1, tag, conf);
                 }
+                
+                println!("\nQuick Tags (1-9):");
+                for (j, tag) in profile.tags.iter().take(9).enumerate() {
+                    println!("  {}. {:<15}", j + 1, tag.name);
+                }
                 println!("  S. Skip");
-                println!("  T. New tag...");
 
-                print!("Choice > ");
+                print!("Tag (or 's' to skip) > ");
                 io::stdout().flush()?;
 
                 let mut input = String::new();
                 io::stdin().read_line(&mut input)?;
-                let input = input.trim().to_lowercase();
+                let input = input.trim();
 
-                if input == "s" {
+                if input.to_lowercase() == "s" {
                     continue;
                 }
 
-                if input == "t" {
-                    print!("Enter new tag name: ");
-                    io::stdout().flush()?;
-                    let mut tag_name = String::new();
-                    io::stdin().read_line(&mut tag_name)?;
-                    let tag_name = tag_name.trim();
-                    if !tag_name.is_empty() {
-                        profile.learn(&item.entry.description, tag_name);
-                        learned_any = true;
-                    }
+                if input.is_empty() {
+                    println!("Empty input, skipping.");
                     continue;
                 }
 
                 if let Ok(idx) = input.parse::<usize>() {
-                    if idx > 0 && idx <= item.candidates.len() {
-                        let (tag, _) = &item.candidates[idx - 1];
-                        profile.learn(&item.entry.description, tag);
+                    if idx > 0 && idx <= 9 && idx <= profile.tags.len() {
+                        let tag = profile.tags[idx - 1].name.clone();
+                        profile.learn(&item.entry.description, &tag);
                         learned_any = true;
+                        save_profile_atomically(&profile_path, &profile)?;
+                        println!("Tagged as: {}", tag);
                         continue;
                     }
                 }
 
-                println!("Invalid choice, skipping.");
+                // 1. Try exact match or unique prefix match against existing tags
+                let matching_tags: Vec<String> = profile.tags.iter()
+                    .filter(|t| t.name.to_lowercase().starts_with(&input.to_lowercase()))
+                    .map(|t| t.name.clone())
+                    .collect();
+
+                if matching_tags.len() == 1 {
+                    let tag = &matching_tags[0];
+                    profile.learn(&item.entry.description, tag);
+                    learned_any = true;
+                    save_profile_atomically(&profile_path, &profile)?;
+                    println!("Tagged as: {}", tag);
+                    continue;
+                } else if matching_tags.len() > 1 {
+                    println!("Ambiguous match. Did you mean: {:?}", 
+                        matching_tags);
+                    continue;
+                }
+
+                // 2. If no match, treat as a new tag
+                profile.learn(&item.entry.description, input);
+                learned_any = true;
+                save_profile_atomically(&profile_path, &profile)?;
+                println!("Learned new tag: {}", input);
             }
 
             if learned_any {

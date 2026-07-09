@@ -45,7 +45,9 @@ fn fold(text: &str) -> String {
 
 fn digit_fraction(token: &str) -> f64 {
     let digits = token.chars().filter(|c| c.is_ascii_digit()).count();
-    digits as f64 / token.chars().count() as f64
+    let len = token.chars().count();
+    if len == 0 { return 1.0; }
+    digits as f64 / len as f64
 }
 
 /// Strip noise from a raw entry description and split it into tokens.
@@ -70,12 +72,16 @@ pub fn normalize(text: &str) -> Normalized {
         .find_iter(&text)
         .map(|m| m.as_str().to_string())
         .filter(|t| t.chars().count() >= 2)
-        .filter(|t| digit_fraction(t) <= 0.5)
+        .filter(|t| {
+            let df = digit_fraction(t);
+            if t.chars().all(|c| c.is_ascii_digit()) {
+                return false;
+            }
+            df <= 0.4
+        })
         .filter(|t| !STOPWORDS.contains(&t.as_str()))
         .collect();
-    tokens.extend(ibans.iter().cloned());
-    tokens.extend(phones.iter().cloned());
-
+    
     let key = tokens.iter().collect::<BTreeSet<_>>().into_iter().cloned().collect::<Vec<_>>().join(" ");
 
     Normalized { tokens, key, ibans, phones }
