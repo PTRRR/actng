@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Paragraph};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -25,7 +25,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(4), Constraint::Min(3), Constraint::Length(1)])
+        .constraints([Constraint::Length(5), Constraint::Min(3), Constraint::Length(1)])
         .split(area);
 
     let date = entry.date.map(|d| d.to_string()).unwrap_or_else(|| "?".to_string());
@@ -50,7 +50,9 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         }
     }
     frame.render_widget(
-        Paragraph::new(header_lines).block(titled_block(format!("Review \u{2014} {} of {}", cursor + 1, queue.len()))),
+        Paragraph::new(header_lines)
+            .block(titled_block(format!("Review \u{2014} {} of {}", cursor + 1, queue.len())))
+            .wrap(ratatui::widgets::Wrap { trim: false }),
         chunks[0],
     );
 
@@ -77,13 +79,20 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .enumerate()
         .map(|(i, &idx)| {
             let e = &app.dataset.entries[idx];
-            let marker = if i == cursor { "\u{25b8} " } else { "  " };
             let amount = e.amount.map(|a| format!("{a:.2}")).unwrap_or_default();
-            let style = if i == cursor { Style::default().add_modifier(Modifier::BOLD) } else { Style::default() };
-            ListItem::new(format!("{marker}{:<40} {:>10}", truncate(&e.description, 40), amount)).style(style)
+            ListItem::new(format!("{:<40} {:>10}", truncate(&e.description, 40), amount))
         })
         .collect();
-    frame.render_widget(List::new(queue_items).block(titled_block("Queue")), body[1]);
+    let mut list_state = ListState::default();
+    list_state.select(Some(cursor));
+    frame.render_stateful_widget(
+        List::new(queue_items)
+            .block(titled_block("Queue"))
+            .highlight_symbol("\u{25b8} ")
+            .highlight_style(Style::default().add_modifier(Modifier::BOLD)),
+        body[1],
+        &mut list_state,
+    );
 
     let help = "1-9 confirm \u{b7} t/Enter picker \u{b7} n new tag \u{b7} s skip \u{b7} u undo \u{b7} a all-entries";
     frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::DarkGray)), chunks[2]);

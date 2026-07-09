@@ -2,6 +2,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 use ratatui::Frame;
+use ratatui::widgets::TableState;
 
 use crate::app::{App, EntryFilter};
 use crate::update::filtered_entry_indices;
@@ -37,8 +38,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 None => ("(review)".to_string(), Style::default().fg(Color::Red)),
             };
             let source = app.dataset.sources.get(app.dataset.source[idx]).map(|p| p.display().to_string()).unwrap_or_default();
-            let selected = row_i == app.entries_cursor;
-            let base = if selected { Style::default().bg(Color::DarkGray) } else { Style::default() };
             Row::new(vec![
                 Cell::from(date),
                 Cell::from(amount),
@@ -46,7 +45,6 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 Cell::from(tag_text).style(tag_style),
                 Cell::from(source),
             ])
-            .style(base)
         })
         .collect();
 
@@ -60,8 +58,13 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let search_suffix = app.entries_search.as_deref().map(|s| format!(" /{s}")).unwrap_or_default();
     let table = Table::new(rows, widths)
         .header(header)
-        .block(titled_block(format!("Entries \u{2014} {filter_label} ({}){search_suffix}", indices.len())));
-    frame.render_widget(table, chunks[0]);
+        .block(titled_block(format!("Entries \u{2014} {filter_label} ({}){search_suffix}", indices.len())))
+        .highlight_style(Style::default().bg(Color::DarkGray));
+
+    let mut table_state = TableState::default();
+    table_state.select(Some(app.entries_cursor));
+
+    frame.render_stateful_widget(table, chunks[0], &mut table_state);
 
     let help = "/ search \u{b7} f cycle filter \u{b7} Enter retag \u{b7} j/k move";
     frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::DarkGray)), chunks[1]);
