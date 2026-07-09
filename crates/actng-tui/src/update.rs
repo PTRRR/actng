@@ -55,8 +55,6 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
             return vec![];
         }
         KeyCode::Char('R') => return vec![Cmd::Rescan],
-        // On the Review screen, 1-9 are the candidate-confirm shortcuts
-        // (§4.2) and take priority over screen-switching; Tab still works.
         KeyCode::Tab => {
             let idx = Screen::ALL
                 .iter()
@@ -66,6 +64,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
         }
         _ => {}
     }
+
+    // Update state selectors to match cursors before rendering
+    app.review_state.select(Some(app.review_cursor));
+    app.entries_state.select(Some(app.entries_cursor));
 
     match app.screen {
         Screen::Overview => vec![],

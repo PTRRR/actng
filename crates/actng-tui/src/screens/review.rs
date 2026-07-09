@@ -83,7 +83,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             ListItem::new(format!("{:<40} {:>10}", truncate(&e.description, 40), amount))
         })
         .collect();
-    let mut list_state = ListState::default();
+    let mut list_state = app.review_state.clone();
     list_state.select(Some(cursor));
     frame.render_stateful_widget(
         List::new(queue_items)

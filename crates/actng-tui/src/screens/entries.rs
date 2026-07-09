@@ -1,5 +1,6 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 use ratatui::widgets::TableState;
@@ -9,12 +10,47 @@ use crate::update::filtered_entry_indices;
 use crate::view::titled_block;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
+    let indices = filtered_entry_indices(app);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(5), // Header section for full text
+            Constraint::Min(3),    // Table section
+            Constraint::Length(1), // Help line
+        ])
         .split(area);
 
-    let indices = filtered_entry_indices(app);
+    // Render entry detail header
+    if !indices.is_empty() {
+        let cursor = app.entries_cursor.min(indices.len() - 1);
+        let entry_idx = indices[cursor];
+        let entry = &app.dataset.entries[entry_idx];
+
+        let date = entry.date.map(|d| d.to_string()).unwrap_or_else(|| "?".to_string());
+        let amount = entry.amount.map(|a| format!("{a:.2}")).unwrap_or_default();
+        
+        let header_lines = vec![
+            Line::from(vec![
+                Span::raw(format!("{date}   ")),
+                Span::raw(format!("{amount}   ")),
+                Span::raw(format!("{}", entry.description)),
+            ]),
+        ];
+
+        frame.render_widget(
+            Paragraph::new(header_lines)
+                .block(titled_block(format!("Detail \u{2014} {} of {}", cursor + 1, indices.len())))
+                .wrap(ratatui::widgets::Wrap { trim: false }),
+            chunks[0],
+        );
+    } else {
+        frame.render_widget(
+            Paragraph::new("no entries found").block(titled_block("Detail")),
+            chunks[0],
+        );
+    }
+
     let filter_label = match &app.entries_filter {
         EntryFilter::All => "all".to_string(),
         EntryFilter::Tagged => "tagged".to_string(),
@@ -61,11 +97,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .block(titled_block(format!("Entries \u{2014} {filter_label} ({}){search_suffix}", indices.len())))
         .highlight_style(Style::default().bg(Color::DarkGray));
 
-    let mut table_state = TableState::default();
+    let mut table_state = app.entries_state.clone();
     table_state.select(Some(app.entries_cursor));
+    frame.render_stateful_widget(table, chunks[1], &mut table_state);
 
-    frame.render_stateful_widget(table, chunks[0], &mut table_state);
 
     let help = "/ search \u{b7} f cycle filter \u{b7} Enter retag \u{b7} j/k move";
-    frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::DarkGray)), chunks[1]);
+    frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::DarkGray)), chunks[2]);
 }

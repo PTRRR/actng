@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use crossterm::event::KeyEvent;
+use ratatui::widgets::{ListState, TableState};
 
 use actng_core::{Dataset, Encoding, Profile, Suggestion};
 
@@ -206,11 +207,13 @@ pub struct App {
     // Review screen state.
     pub review_all: bool,
     pub review_cursor: usize,
+    pub review_state: ListState,
 
     // Entries screen state.
     pub entries_cursor: usize,
     pub entries_filter: EntryFilter,
     pub entries_search: Option<String>,
+    pub entries_state: TableState,
 
     // Files screen state.
     pub files_cursor: usize,
@@ -251,12 +254,15 @@ impl App {
             toast: None,
             last_saved: None,
             should_quit: false,
-            review_all: false,
-            review_cursor: 0,
-            entries_cursor: 0,
-            entries_filter: EntryFilter::All,
-            entries_search: None,
-            files_cursor: 0,
+        review_all: false,
+        review_cursor: 0,
+        review_state: ListState::default(),
+        entries_cursor: 0,
+        entries_filter: EntryFilter::All,
+        entries_search: None,
+        entries_state: TableState::default(),
+        files_cursor: 0,
+
             tags_cursor: 0,
             tags_sort: TagSort::Name,
         };
