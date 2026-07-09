@@ -13,10 +13,10 @@ use crate::profile::Profile;
 const SNIFF_BYTES: usize = 8192;
 
 /// Result of a single file import during a batch run.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileImport {
     pub path: PathBuf,
-    pub result: Result<Import, Error>,
+    pub result: Result<Import, String>,
 }
 
 /// Find all files in `path` (recursively, skipping hidden directories) that
@@ -30,7 +30,10 @@ pub fn discover(path: impl AsRef<Path>) -> Result<Vec<PathBuf>, Error> {
         let path = entry.path();
 
         if path.is_dir() {
-            let hidden = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with('.'));
+            let hidden = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with('.'));
             if hidden {
                 continue;
             }
@@ -46,7 +49,11 @@ pub fn discover(path: impl AsRef<Path>) -> Result<Vec<PathBuf>, Error> {
 /// its content sniffs as a delimited table rather than free-form prose (a
 /// stray `notes.txt` shouldn't be imported and reported as a parse error).
 fn is_bank_file(path: &Path) -> bool {
-    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_lowercase();
     match ext.as_str() {
         "csv" | "tsv" => true,
         "txt" => sniffs_as_delimited(path),
@@ -55,9 +62,13 @@ fn is_bank_file(path: &Path) -> bool {
 }
 
 fn sniffs_as_delimited(path: &Path) -> bool {
-    let Ok(mut file) = fs::File::open(path) else { return false };
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
     let mut buf = vec![0u8; SNIFF_BYTES];
-    let Ok(n) = file.read(&mut buf) else { return false };
+    let Ok(n) = file.read(&mut buf) else {
+        return false;
+    };
     buf.truncate(n);
     let (text, _) = decode_text(&buf);
     looks_delimited(&text)
@@ -69,7 +80,8 @@ pub fn import_dir(path: impl AsRef<Path>, profile: &Profile) -> Result<Vec<FileI
     let mut results = Vec::new();
 
     for file in files {
-        let result = read_entries_from_path_with_layouts(&file, &profile.layouts);
+        let result =
+            read_entries_from_path_with_layouts(&file, &profile.layouts).map_err(|e| e.to_string());
         results.push(FileImport { path: file, result });
     }
 
@@ -101,7 +113,11 @@ pub struct Dataset {
 type DedupKey = (Option<chrono::NaiveDate>, String, Option<i64>);
 
 fn dedup_key(entry: &Entry) -> DedupKey {
-    (entry.date, normalize(&entry.description).key, entry.amount.map(|a| (a * 100.0).round() as i64))
+    (
+        entry.date,
+        normalize(&entry.description).key,
+        entry.amount.map(|a| (a * 100.0).round() as i64),
+    )
 }
 
 /// Consume a batch of `FileImport`s into a single deduplicated `Dataset`.
@@ -132,11 +148,17 @@ pub fn collect(imports: Vec<FileImport>) -> Dataset {
                     }
                 }
             }
-            Err(e) => failures.push((path, e)),
+            Err(e) => failures.push((path, Error::Other(e))),
         }
     }
 
-    Dataset { entries, source, sources, failures, duplicates_dropped: dropped }
+    Dataset {
+        entries,
+        source,
+        sources,
+        failures,
+        duplicates_dropped: dropped,
+    }
 }
 
 #[cfg(test)]
@@ -197,13 +219,25 @@ mod tests {
         fs::write(hidden.join("config.csv"), "a,b,c").unwrap();
 
         let found = discover(root).unwrap();
-        let paths: Vec<_> = found.iter().map(|p| p.file_name().unwrap().to_str().unwrap()).collect();
+        let paths: Vec<_> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
 
         assert!(paths.contains(&"statement1.csv"));
         assert!(paths.contains(&"statement2.tsv"));
-        assert!(paths.contains(&"export.txt"), "tab-delimited .txt should sniff as a bank file");
-        assert!(!paths.contains(&"notes.txt"), "prose .txt should not sniff as a bank file");
-        assert!(!paths.contains(&"config.csv"), "hidden directories are skipped");
+        assert!(
+            paths.contains(&"export.txt"),
+            "tab-delimited .txt should sniff as a bank file"
+        );
+        assert!(
+            !paths.contains(&"notes.txt"),
+            "prose .txt should not sniff as a bank file"
+        );
+        assert!(
+            !paths.contains(&"config.csv"),
+            "hidden directories are skipped"
+        );
         assert_eq!(found.len(), 3);
     }
 
@@ -219,7 +253,10 @@ mod tests {
         // Create a profile with a pre-existing layout for this file
         let mut profile = Profile::new("test");
         let fresh_import = crate::import::read_entries_from_path(&path, None).unwrap();
-        profile.layouts.insert(fresh_import.fingerprint.clone(), fresh_import.profile.clone());
+        profile.layouts.insert(
+            fresh_import.fingerprint.clone(),
+            fresh_import.profile.clone(),
+        );
 
         let results = import_dir(root, &profile).unwrap();
         assert_eq!(results.len(), 1);
@@ -239,21 +276,43 @@ mod tests {
             raw: vec![],
         };
 
-        let import_a =
-            test_import(vec![make_entry("COOP LAUSANNE 123", -12.50), make_entry("MIGROS", -8.00)], "a");
+        let import_a = test_import(
+            vec![
+                make_entry("COOP LAUSANNE 123", -12.50),
+                make_entry("MIGROS", -8.00),
+            ],
+            "a",
+        );
         // Same merchant/date/amount as one entry in file a: a cross-file duplicate.
         let import_b = test_import(vec![make_entry("COOP LAUSANNE 456", -12.50)], "b");
 
         let imports = vec![
-            FileImport { path: PathBuf::from("a.csv"), result: Ok(import_a) },
-            FileImport { path: PathBuf::from("b.csv"), result: Ok(import_b) },
+            FileImport {
+                path: PathBuf::from("a.csv"),
+                result: Ok(import_a),
+            },
+            FileImport {
+                path: PathBuf::from("b.csv"),
+                result: Ok(import_b),
+            },
         ];
 
         let dataset = collect(imports);
-        assert_eq!(dataset.entries.len(), 2, "cross-file duplicate should be dropped");
+        assert_eq!(
+            dataset.entries.len(),
+            2,
+            "cross-file duplicate should be dropped"
+        );
         assert_eq!(dataset.duplicates_dropped, 1);
-        assert_eq!(dataset.sources, vec![PathBuf::from("a.csv"), PathBuf::from("b.csv")]);
-        assert_eq!(dataset.source, vec![0, 0], "both surviving entries came from file a");
+        assert_eq!(
+            dataset.sources,
+            vec![PathBuf::from("a.csv"), PathBuf::from("b.csv")]
+        );
+        assert_eq!(
+            dataset.source,
+            vec![0, 0],
+            "both surviving entries came from file a"
+        );
         assert!(dataset.failures.is_empty());
     }
 
@@ -273,8 +332,14 @@ mod tests {
         );
 
         let imports = vec![
-            FileImport { path: PathBuf::from("good.csv"), result: Ok(good) },
-            FileImport { path: PathBuf::from("broken.csv"), result: Err(Error::Empty) },
+            FileImport {
+                path: PathBuf::from("good.csv"),
+                result: Ok(good),
+            },
+            FileImport {
+                path: PathBuf::from("broken.csv"),
+                result: Err("Empty".to_string()),
+            },
         ];
 
         let dataset = collect(imports);

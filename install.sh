@@ -9,7 +9,8 @@ echo "Building actng..."
 cargo build --release
 
 echo "Installing binary to $INSTALL_DIR..."
-cp target/release/actng-cli "$INSTALL_DIR/actng"
+rm -f "$INSTALL_DIR/actng"
+cp target/release/actng "$INSTALL_DIR/actng"
 
 # Check if directory is in PATH
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* ]]; then

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use actng_core::{collect, import_dir, write_csv, Encoding, Profile, Source, Suggestion};
+use crossterm::ExecutableCommand;
 
 #[derive(Parser)]
 #[command(name = "actng")]
@@ -73,6 +74,11 @@ enum Commands {
         /// Include per-category summary
         #[arg(short, long)]
         summary: bool,
+    },
+    /// Launch the interactive TUI
+    Tui {
+        /// Override directory
+        directory: Option<PathBuf>,
     },
     /// Show profile statistics
     ProfileInfo,
@@ -160,6 +166,44 @@ fn run() -> anyhow::Result<ExitCode> {
             save_profile_atomically(&profile_path, &profile)?;
             println!("Initialized new profile at {:?}", profile_path);
             ExitCode::SUCCESS
+        }
+        Commands::Tui { directory } => {
+            let dir = directory.as_ref().unwrap_or(&cli.directory);
+            let profile_path = resolve_profile_path(cli.profile.as_deref());
+            let profile = Profile::load(&profile_path)
+                .map_err(|e| anyhow::anyhow!("Failed to load profile: {}", e))?;
+
+            let imports = import_dir(dir, &profile)?;
+            let dataset = collect(imports.clone());
+            let file_details: Vec<_> = imports
+                .into_iter()
+                .filter_map(|fi| {
+                    let imp = fi.result.as_ref().ok()?;
+                    Some(actng_tui::app::FileDetail {
+                        path: fi.path.clone(),
+                        entries: imp.entries.len(),
+                        delimiter: imp.delimiter,
+                        encoding: imp.encoding,
+                        skipped_rows: imp.skipped_rows,
+                        layout_remembered: profile.layouts.contains_key(&imp.fingerprint),
+                    })
+                })
+                .collect();
+
+            let mut stdout = std::io::stdout();
+            crossterm::terminal::enable_raw_mode()?;
+            stdout.execute(crossterm::terminal::EnterAlternateScreen)?;
+            let backend = ratatui::backend::CrosstermBackend::new(stdout);
+            let mut terminal = ratatui::Terminal::new(backend)?;
+
+            let result = actng_tui::run(&mut terminal, dir, &profile_path);
+
+            crossterm::terminal::disable_raw_mode()?;
+            std::io::stdout().execute(crossterm::terminal::LeaveAlternateScreen)?;
+
+            result
+                .map(|_| ExitCode::SUCCESS)
+                .map_err(|e| anyhow::anyhow!("TUI error: {e}"))?
         }
         Commands::ProfileInfo => {
             let profile = Profile::load(&profile_path)

@@ -98,6 +98,38 @@ impl NaiveBayes {
         self.doc_counts.get(tag).copied().unwrap_or(0)
     }
 
+    /// Reverse one `train` call: decrement the doc and token counts recorded
+    /// for `tokens` under `tag` (saturating at zero). If `tag`'s document
+    /// count reaches zero it disappears entirely, same as `remove_tag`.
+    pub fn untrain(&mut self, tokens: &[String], tag: &str) {
+        let distinct: BTreeSet<&str> = tokens.iter().map(String::as_str).collect();
+        if distinct.is_empty() || !self.doc_counts.contains_key(tag) {
+            return;
+        }
+        let docs = self.doc_counts.entry(tag.to_string()).or_default();
+        *docs = docs.saturating_sub(1);
+        self.total_docs = self.total_docs.saturating_sub(1);
+        if let Some(counts) = self.token_counts.get_mut(tag) {
+            for token in &distinct {
+                if let Some(c) = counts.get_mut(*token) {
+                    *c = c.saturating_sub(1);
+                    if *c == 0 {
+                        counts.remove(*token);
+                    }
+                }
+            }
+        }
+        if let Some(total) = self.tag_token_totals.get_mut(tag) {
+            *total = total.saturating_sub(distinct.len() as u64);
+        }
+        if self.doc_counts.get(tag).copied().unwrap_or(0) == 0 {
+            self.doc_counts.remove(tag);
+            self.token_counts.remove(tag);
+            self.tag_token_totals.remove(tag);
+        }
+        self.vocab = self.token_counts.values().flat_map(|m| m.keys().cloned()).collect();
+    }
+
     /// Rewrite all training data recorded under `old` to `new`, merging into
     /// `new`'s counts if it already has training data of its own.
     pub fn rename_tag(&mut self, old: &str, new: &str) {
@@ -157,6 +189,35 @@ mod tests {
         assert!(nb.classify(&toks("anything")).is_empty());
         nb.train(&toks("coop lausanne"), "groceries");
         assert!(nb.classify(&toks("completely unseen words")).is_empty());
+    }
+
+    #[test]
+    fn untrain_reverses_train() {
+        let mut nb = NaiveBayes::new();
+        nb.train(&toks("coop ls bel air lausanne"), "groceries");
+        nb.train(&toks("migros silo renens"), "groceries");
+        nb.train(&toks("grimper boulder"), "climbing");
+
+        nb.untrain(&toks("grimper boulder"), "climbing");
+        assert_eq!(nb.doc_count("climbing"), 0);
+        assert!(!nb.tags().any(|t| t == "climbing"), "tag disappears once its doc count hits zero");
+        assert!(nb.classify(&toks("grimper boulder")).is_empty(), "no lingering evidence for the untrained tag");
+
+        // groceries still has one training doc left with correct counts.
+        assert_eq!(nb.doc_count("groceries"), 2);
+        nb.untrain(&toks("migros silo renens"), "groceries");
+        assert_eq!(nb.doc_count("groceries"), 1);
+        let scores = nb.classify(&toks("coop ls bel air lausanne"));
+        assert_eq!(scores[0].0, "groceries");
+    }
+
+    #[test]
+    fn untrain_on_unknown_tag_is_a_no_op() {
+        let mut nb = NaiveBayes::new();
+        nb.train(&toks("coop lausanne"), "groceries");
+        nb.untrain(&toks("something else"), "unknown");
+        assert_eq!(nb.doc_count("groceries"), 1);
+        assert_eq!(nb.doc_count("unknown"), 0);
     }
 
     #[test]

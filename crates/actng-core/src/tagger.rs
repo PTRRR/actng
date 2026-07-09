@@ -95,6 +95,19 @@ impl Tagger {
         self.bayes.train(&n.tokens, tag);
     }
 
+    /// Reverse one `learn` call: drop the exact-match entry for `description`
+    /// if it still maps to `tag` (a later `learn` for the same description
+    /// under a different tag is left alone), and untrain the classifier.
+    /// Does not unregister `tag` from any declared tag list — that's
+    /// `Profile::remove_tag`'s job.
+    pub fn unlearn(&mut self, description: &str, tag: &str) {
+        let n = normalize(description);
+        if self.exact.get(&n.key).map(String::as_str) == Some(tag) {
+            self.exact.remove(&n.key);
+        }
+        self.bayes.untrain(&n.tokens, tag);
+    }
+
     /// Rewrite every exact-match entry and Bayes count recorded under `old`
     /// to `new` (used when a tag is renamed).
     pub fn rename_tag(&mut self, old: &str, new: &str) {
@@ -174,6 +187,28 @@ mod tests {
         let mut tagger = Tagger::new();
         tagger.learn("COOP LAUSANNE", "groceries");
         assert!(tagger.suggest("SOMETHING ENTIRELY DIFFERENT").is_none());
+    }
+
+    #[test]
+    fn unlearn_reverses_learn() {
+        let mut tagger = Tagger::new();
+        tagger.learn("GRIMPER.CH LAUSANNE", "climbing");
+        assert!(tagger.suggest("GRIMPER.CH LAUSANNE").is_some());
+
+        tagger.unlearn("GRIMPER.CH LAUSANNE", "climbing");
+        assert!(tagger.suggest("GRIMPER.CH LAUSANNE").is_none());
+        assert!(!tagger.tags().contains(&"climbing".to_string()));
+    }
+
+    #[test]
+    fn unlearn_leaves_a_later_overwrite_alone() {
+        let mut tagger = Tagger::new();
+        tagger.learn("GRIMPER.CH LAUSANNE", "climbing");
+        tagger.learn("GRIMPER.CH LAUSANNE", "sport"); // user corrected their mind
+
+        // Undoing the stale "climbing" confirmation must not clobber "sport".
+        tagger.unlearn("GRIMPER.CH LAUSANNE", "climbing");
+        assert_eq!(tagger.suggest("GRIMPER.CH LAUSANNE").unwrap().tag, "sport");
     }
 
     #[test]

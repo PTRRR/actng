@@ -1,0 +1,18 @@
+[package]
+name = "actng-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "actng-tui"
+path = "src/main.rs"
+
+[dependencies]
+actng-core = { path = "../actng-core" }
+ratatui = "0.30"
+crossterm = "0.29"
+anyhow = "1.0"
+
+[dev-dependencies]
+csv = "1.4.0"
+tempfile = "3.27.0"

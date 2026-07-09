@@ -15,4 +15,6 @@ pub enum Error {
     UnsupportedVersion { found: u32, current: u32 },
     #[error("unknown tag: {0}")]
     UnknownTag(String),
+    #[error("other error: {0}")]
+    Other(String),
 }

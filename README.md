@@ -25,10 +25,19 @@ actng scan ./statements
 ```
 
 ### 3. Train the model
-Review transactions that the model is unsure about. You can assign tags, create new ones, or skip.
+Review transactions that the model is unsure about using the interactive TUI.
 ```bash
 actng review ./statements
 ```
+
+#### TUI Hotkeys
+- `1-9`: Confirm the corresponding suggestion.
+- `t` or `n`: Manually assign a tag (or create a new one).
+- `s`: Skip the current transaction.
+- `u`: Undo the last training step.
+- `a`: Toggle "Review All" mode (include confidently tagged entries).
+- `q`: Quit.
+
 
 ### 4. Tag and Export
 Once trained, apply the tags to all discovered entries and export the results.

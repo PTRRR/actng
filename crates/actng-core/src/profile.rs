@@ -94,6 +94,12 @@ impl Profile {
         self.add_tag(tag);
     }
 
+    /// Reverse one `learn` call (see [`Tagger::unlearn`]). Does not
+    /// unregister `tag` from `self.tags` — only `remove_tag` does that.
+    pub fn unlearn(&mut self, description: &str, tag: &str) {
+        self.tagger.unlearn(description, tag);
+    }
+
     pub fn suggest(&self, description: &str) -> Option<Suggestion> {
         self.tagger.suggest(description)
     }
