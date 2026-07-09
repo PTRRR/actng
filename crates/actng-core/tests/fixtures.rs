@@ -44,13 +44,13 @@ const EXPECTATIONS: &[Expectation] = &[
     // 2 trailing footer rows ("FOOTER ROW TEST") share the data rows' field
     // count so they survive delimiter sniffing; they correctly get no
     // date/amount rather than failing the row.
-    Expectation { file: "test_headers.csv", min_entries: 75, min_with_date: 73, min_with_amount: 73, known_failing: false },
+    Expectation { file: "test_headers.csv", min_entries: 73, min_with_date: 73, min_with_amount: 73, known_failing: false },
 
     // Fixed by preamble skipping + split debit/credit columns (SPEC §4.2
     // task 3). Each real transaction here is followed by a continuation row
-    // (extra description text, no date/amount of its own) — that's not a
-    // failure, just a second entry with nothing to tag.
-    Expectation { file: "TransactionHistory_20180418043121.csv", min_entries: 16, min_with_date: 8, min_with_amount: 8, known_failing: false },
+    // (extra description text, no date/amount of its own) — these are now
+    // collapsed into the main entry.
+    Expectation { file: "TransactionHistory_20180418043121.csv", min_entries: 8, min_with_date: 8, min_with_amount: 8, known_failing: false },
 
     // Fixed by split debit/credit columns (SPEC §4.2 task 3): the amount
     // lands in one of two columns depending on debit vs. credit, so the

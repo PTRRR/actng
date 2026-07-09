@@ -11,5 +11,6 @@ pub struct Entry {
     /// Amount, if the source file carries one.
     pub amount: Option<f64>,
     /// The raw CSV fields the entry was built from, for display and debugging.
-    pub raw: Vec<String>,
+    /// For multi-row entries, this contains the fields for each row.
+    pub raw: Vec<Vec<String>>,
 }

@@ -191,6 +191,7 @@ impl ImportProfile {
     }
 }
 
+
 /// Rank candidate date formats by how many of `values` they parse; ties are
 /// broken by preferring the format under which the parsed dates best keep a
 /// consistent (ascending or descending) order — statements are usually sorted,
@@ -440,30 +441,46 @@ fn build_import(
     let data = if profile.has_header && !records.is_empty() { &records[1..] } else { &records[..] };
 
     let mut skipped_rows = preamble_dropped;
-    let entries = data
-        .iter()
-        .filter_map(|row| {
-            let description = profile
-                .description_columns
-                .iter()
-                .map(|&i| cell(row, i).trim())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(" ");
-            if description.is_empty() {
+    let mut entries: Vec<Entry> = Vec::new();
+    for row in data {
+        let description = profile
+            .description_columns
+            .iter()
+            .map(|&i| cell(row, i).trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let date = profile
+            .date_column
+            .and_then(|i| parse_date(cell(row, i), &profile.date_formats));
+        let amount = profile.read_amount(row);
+
+        if description.is_empty() {
+            skipped_rows += 1;
+            continue;
+        }
+
+        if date.is_none() && amount.is_none() {
+            if let Some(last) = entries.last_mut() {
+                if !last.description.is_empty() {
+                    last.description.push(' ');
+                }
+                last.description.push_str(&description);
+                last.raw.push(row.clone());
+            } else {
                 skipped_rows += 1;
-                return None;
             }
-            Some(Entry {
-                date: profile
-                    .date_column
-                    .and_then(|i| parse_date(cell(row, i), &profile.date_formats)),
-                description,
-                amount: profile.read_amount(row),
-                raw: row.clone(),
-            })
-        })
-        .collect();
+            continue;
+        }
+
+        entries.push(Entry {
+            date,
+            description,
+            amount,
+            raw: vec![row.clone()],
+        });
+    }
 
     Ok(Import { profile, entries, fingerprint, delimiter, encoding, skipped_rows })
 }
@@ -685,6 +702,21 @@ mod tests {
         assert!(!p.has_header);
         assert_eq!(p.date_column, Some(0));
         assert_eq!(p.description_columns, vec![1]);
+    }
+
+    #[test]
+    fn collapses_multi_row_entries() {
+        let csv = "Date,Text,Amount\n\
+                   2025-01-01,First part,-10.00\n\
+                   ,Second part,\n\
+                   ,Third part,\n\
+                   2025-01-02,Another entry,-20.00\n";
+        let import = read_entries(csv.as_bytes(), None).unwrap();
+        assert_eq!(import.entries.len(), 2);
+        assert_eq!(import.entries[0].description, "First part Second part Third part");
+        assert_eq!(import.entries[0].amount, Some(-10.0));
+        assert_eq!(import.entries[0].raw.len(), 3);
+        assert_eq!(import.entries[1].description, "Another entry");
     }
 
     #[test]
