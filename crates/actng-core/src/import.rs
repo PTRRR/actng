@@ -186,7 +186,7 @@ impl ImportProfile {
         let credit = self.credit_column.and_then(|i| parse_amount(cell(row, i)));
         match (debit, credit) {
             (None, None) => None,
-            (debit, credit) => Some(credit.unwrap_or(0.0) - debit.unwrap_or(0.0)),
+            (debit, credit) => Some(credit.unwrap_or(0.0) - debit.unwrap_or(0.0).abs()),
         }
     }
 }
