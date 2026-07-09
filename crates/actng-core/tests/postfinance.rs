@@ -51,17 +51,10 @@ fn profile_run_partitions_results() {
     profile.learn("ACHAT/PRESTATION TWINT DU 06.11.2025 GRIMPER.CH LAUSANNE (CH)", "climbing");
     profile.learn("ACHAT/SERVICE DU 07.06.2025 CARTE NO XXXX6273 COOP-5386 LS BEL AIR FOOBY LAUSANNE (CH)", "groceries");
 
-    let file_import = actng_core::FileImport {
-        path: example_path(),
-        result: Ok(actng_core::Import {
-            profile: import.profile,
-            entries: import.entries,
-            fingerprint: import.fingerprint,
-        }),
-    };
+    let file_import = actng_core::FileImport { path: example_path(), result: Ok(import) };
 
-    let imports = [file_import];
-    let result = profile.run(&imports);
+    let dataset = actng_core::collect(vec![file_import]);
+    let result = profile.run(&dataset);
 
     assert!(!result.tagged.is_empty(), "should have tagged entries");
     assert!(!result.review.is_empty(), "should have entries for review");
@@ -74,25 +67,11 @@ fn profile_run_deduplicates_identical_entries() {
     let import = read_entries_from_path(example_path(), None).unwrap();
     let profile = actng_core::Profile::new("test");
 
-    let file_import_1 = actng_core::FileImport {
-        path: example_path(),
-        result: Ok(actng_core::Import {
-            profile: import.profile.clone(),
-            entries: import.entries.clone(),
-            fingerprint: import.fingerprint.clone(),
-        }),
-    };
-    let file_import_2 = actng_core::FileImport {
-        path: example_path(),
-        result: Ok(actng_core::Import {
-            profile: import.profile.clone(),
-            entries: import.entries.clone(),
-            fingerprint: import.fingerprint.clone(),
-        }),
-    };
+    let file_import_1 = actng_core::FileImport { path: example_path(), result: Ok(import.clone()) };
+    let file_import_2 = actng_core::FileImport { path: example_path(), result: Ok(import.clone()) };
 
-    let imports = [file_import_1, file_import_2];
-    let result = profile.run(&imports);
+    let dataset = actng_core::collect(vec![file_import_1, file_import_2]);
+    let result = profile.run(&dataset);
 
     // The file itself might have internal duplicates. 
     // The a-priori unique count for one file:

@@ -35,19 +35,21 @@ pub mod bayes;
 pub mod discover;
 pub mod entry;
 pub mod error;
+pub mod export;
 pub mod import;
 pub mod normalize;
 pub mod profile;
 pub mod tagger;
 
 pub use bayes::NaiveBayes;
-pub use discover::{deduplicate, discover, import_dir, FileImport};
+pub use discover::{collect, discover, import_dir, Dataset, FileImport};
 pub use entry::Entry;
 pub use error::Error;
+pub use export::{write_csv, Summary};
 pub use import::{
     read_entries, read_entries_from_path, read_entries_from_path_with_layouts,
-    read_entries_with_layouts, Import, ImportProfile,
+    read_entries_with_layouts, Encoding, Import, ImportProfile,
 };
 pub use normalize::{normalize, Normalized};
 pub use profile::{Profile, Tag, CURRENT_VERSION};
-pub use tagger::{Source, Suggestion, Tagger};
+pub use tagger::{Source, Suggestion, TagStats, Tagger};

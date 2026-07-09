@@ -24,6 +24,15 @@ pub struct Suggestion {
     pub source: Source,
 }
 
+/// Training volume for one tag: how many documents fed the Bayes model and
+/// how many normalized keys resolve to it by exact match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagStats {
+    pub tag: String,
+    pub trained_docs: u64,
+    pub exact_keys: usize,
+}
+
 /// The tagging engine: exact-match memory first, Naive Bayes fallback.
 ///
 /// [`learn`](Tagger::learn) records a user decision in both layers, so the
@@ -116,6 +125,23 @@ impl Tagger {
         tags
     }
 
+    /// Per-tag training volume, sorted by tag name.
+    pub fn stats(&self) -> Vec<TagStats> {
+        let mut exact_keys: HashMap<&str, usize> = HashMap::new();
+        for tag in self.exact.values() {
+            *exact_keys.entry(tag.as_str()).or_default() += 1;
+        }
+        let mut tags = self.tags();
+        tags.sort();
+        tags.into_iter()
+            .map(|tag| {
+                let trained_docs = self.bayes.doc_count(&tag);
+                let exact_keys = exact_keys.get(tag.as_str()).copied().unwrap_or(0);
+                TagStats { tag, trained_docs, exact_keys }
+            })
+            .collect()
+    }
+
     pub fn to_json(&self) -> Result<String, Error> {
         Ok(serde_json::to_string_pretty(self)?)
     }
@@ -148,6 +174,23 @@ mod tests {
         let mut tagger = Tagger::new();
         tagger.learn("COOP LAUSANNE", "groceries");
         assert!(tagger.suggest("SOMETHING ENTIRELY DIFFERENT").is_none());
+    }
+
+    #[test]
+    fn stats_reports_trained_docs_and_exact_keys() {
+        let mut tagger = Tagger::new();
+        tagger.learn("COOP LAUSANNE", "groceries");
+        tagger.learn("MIGROS RENENS", "groceries");
+        tagger.learn("GRIMPER.CH LAUSANNE", "climbing");
+
+        let stats = tagger.stats();
+        assert_eq!(stats.len(), 2);
+        let groceries = stats.iter().find(|s| s.tag == "groceries").unwrap();
+        assert_eq!(groceries.trained_docs, 2);
+        assert_eq!(groceries.exact_keys, 2);
+        let climbing = stats.iter().find(|s| s.tag == "climbing").unwrap();
+        assert_eq!(climbing.trained_docs, 1);
+        assert_eq!(climbing.exact_keys, 1);
     }
 
     #[test]

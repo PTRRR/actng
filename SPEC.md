@@ -179,19 +179,31 @@ concrete fixture that currently fails or would fail:
 ### 4.3 Discovery and batch import (module `discover`)
 
 ```rust
-/// CSV-ish files directly in `dir` (non-recursive in v1), sorted by name.
+/// CSV-ish files under `dir`, found recursively (hidden directories such as
+/// `.git` are skipped), sorted by name.
 pub fn discover(dir: &Path) -> Result<Vec<PathBuf>, Error>;
 
 pub struct FileImport { pub path: PathBuf, pub result: Result<Import, Error> }
 
 /// Import every discovered file; per-file failures are reported, not fatal.
-/// `layouts` provides fingerprint→ImportProfile reuse (see §4.1).
-pub fn import_dir(dir: &Path, layouts: &HashMap<String, ImportProfile>)
-    -> Result<Vec<FileImport>, Error>;
+/// `profile.layouts` provides fingerprint→ImportProfile reuse (see §4.1).
+pub fn import_dir(dir: &Path, profile: &Profile) -> Result<Vec<FileImport>, Error>;
+
+/// Deduplicate entries across files and produce a `Dataset` (§4.4) — owned
+/// entries, per-entry source file, per-file failures, duplicates-dropped
+/// count. The `RunResult`-borrowing shape of `Profile::run` (§4.4) is built
+/// on top of this.
+pub fn collect(imports: Vec<FileImport>) -> Dataset;
 ```
 
-- Discovery matches extensions case-insensitively: `.csv` (and `.txt` only if
-  the content sniffs as delimited — bank exports sometimes use it).
+- **Recursive by default.** Bank exports are commonly organized in
+  per-year or per-account subfolders; discovery descends into them,
+  skipping directories whose name starts with `.`.
+- Discovery matches extensions case-insensitively: `.csv` and `.tsv` by
+  extension alone; `.txt` only if the content sniffs as a delimited table
+  (at least two consistently-split columns across sampled lines) rather
+  than free-form prose — a stray `notes.txt` in the folder is not silently
+  imported and reported as a parse failure.
 - **Deduplication:** overlapping exports are common (user downloads
   Jan–Mar and Feb–Apr). Entry fingerprint = `(date, normalized key, amount)`;
   duplicates across files are collapsed, keeping the first occurrence and
@@ -200,6 +212,14 @@ pub fn import_dir(dir: &Path, layouts: &HashMap<String, ImportProfile>)
 ### 4.4 Applying a profile (batch result type)
 
 ```rust
+pub struct Dataset {
+    pub entries: Vec<Entry>,          // deduplicated, in file order
+    pub source: Vec<usize>,           // parallel: index into `sources`
+    pub sources: Vec<PathBuf>,        // files that contributed at least one entry
+    pub failures: Vec<(PathBuf, Error)>,
+    pub duplicates_dropped: usize,
+}
+
 pub struct Review<'a> { pub entry: &'a Entry, pub candidates: Vec<(String, f64)> }
 
 pub struct RunResult<'a> {
@@ -210,13 +230,40 @@ pub struct RunResult<'a> {
 }
 
 impl Profile {
-    pub fn run<'a>(&self, imports: &'a [FileImport]) -> RunResult<'a>;
+    pub fn run<'a>(&self, dataset: &'a Dataset) -> RunResult<'a>;
+
+    /// Insert fingerprint→layout for every successful import not already
+    /// remembered. Returns how many were newly persisted; the caller saves
+    /// the profile when this is > 0.
+    pub fn remember_layouts(&mut self, imports: &[FileImport]) -> usize;
 }
 ```
 
-This is the single call a CLI *or* GUI makes after import: everything
-confidently tagged on one side, everything needing attention (with ranked
-candidates pre-computed for the picker UI) on the other.
+`Dataset` (built by `discover::collect`, §4.3) owns its entries — unlike a
+borrowed `&[FileImport]`, it can be held onto and re-queried after the
+originating imports are consumed, which both the CLI export path and an
+interactive frontend need. `Profile::run` is the single call a CLI *or* GUI
+makes after import: everything confidently tagged on one side, everything
+needing attention (with ranked candidates pre-computed for the picker UI) on
+the other.
+
+### 4.5 Tagger statistics and CSV export
+
+```rust
+pub struct TagStats { pub tag: String, pub trained_docs: u64, pub exact_keys: usize }
+impl Tagger { pub fn stats(&self) -> Vec<TagStats>; }  // sorted by tag
+
+// module `export`
+pub struct Summary { pub rows: usize, pub per_category: Vec<(String, f64)> }
+pub fn write_csv(w: impl Write, dataset: &Dataset, profile: &Profile,
+                 suggestions: &[Option<Suggestion>]) -> Result<Summary, Error>;
+```
+
+`write_csv` is the shared implementation behind `actng export` (§5.2):
+`date, description, amount, tag, category, source_file`, RFC-4180 quoted,
+one row per dataset entry — tagged or not, so nothing silently disappears.
+`Summary.per_category` buckets every row into its tag's category, or
+`"uncategorized"` if it has none, so the totals always sum to the dataset.
 
 ---
 

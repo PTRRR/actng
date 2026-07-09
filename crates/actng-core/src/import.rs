@@ -29,13 +29,27 @@ pub struct ImportProfile {
     pub date_formats: Vec<String>,
 }
 
+/// How the source bytes were decoded into text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Encoding {
+    Utf8,
+    /// Fallback used when the bytes weren't valid UTF-8.
+    Windows1252,
+}
+
 /// Result of an import: the profile that was used (detected or given), the
-/// parsed entries, and the file's layout fingerprint (see [`fingerprint`]).
+/// parsed entries, the file's layout fingerprint (see [`fingerprint`]), and
+/// detection metadata useful for a debugging/reporting surface (`actng
+/// scan`): the sniffed delimiter and encoding, and how many rows were
+/// dropped as preamble or for lacking a usable description.
 #[derive(Debug, Clone)]
 pub struct Import {
     pub profile: ImportProfile,
     pub entries: Vec<Entry>,
     pub fingerprint: String,
+    pub delimiter: u8,
+    pub encoding: Encoding,
+    pub skipped_rows: usize,
 }
 
 // Trailing `.?` tolerates the Hungarian `2019.04.19.` convention.
@@ -297,6 +311,27 @@ fn score_delimiter(lines: &[&str], delim: u8) -> f64 {
     consistency * m as f64
 }
 
+/// Whether `text` looks like a delimited table (at least two columns, split
+/// consistently across most lines) rather than free-form prose. Used by
+/// `discover::is_bank_file` to decide whether a `.txt` file is worth
+/// importing. Requires at least two non-empty lines — a single line can't
+/// establish consistency, so it's never treated as delimited.
+pub(crate) fn looks_delimited(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).take(20).collect();
+    if lines.len() < 2 {
+        return false;
+    }
+    DELIMITER_CANDIDATES.iter().any(|&delim| {
+        let counts: Vec<usize> = lines.iter().map(|l| l.split(delim as char).count()).collect();
+        let m = mode(&counts);
+        if m < 2 {
+            return false;
+        }
+        let consistency = counts.iter().filter(|&&c| c == m).count() as f64 / counts.len() as f64;
+        consistency >= 0.8
+    })
+}
+
 /// The most frequent value in `values`; ties favor the last one encountered.
 fn mode(values: &[usize]) -> usize {
     values
@@ -350,17 +385,26 @@ fn column_kind(samples: &[&Vec<String>], i: usize) -> char {
     }
 }
 
+/// Strip a UTF-8 BOM and decode as UTF-8, falling back to Windows-1252 when
+/// the bytes aren't valid UTF-8.
+pub(crate) fn decode_text(bytes: &[u8]) -> (String, Encoding) {
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+    match std::str::from_utf8(bytes) {
+        Ok(s) => (s.to_string(), Encoding::Utf8),
+        Err(_) => (decode_windows1252(bytes), Encoding::Windows1252),
+    }
+}
+
+/// Parsed records, the sniffed delimiter, the encoding the bytes were
+/// decoded with, and how many leading preamble rows were dropped.
+type ParsedRecords = (Vec<Vec<String>>, u8, Encoding, usize);
+
 /// Decode, sniff the delimiter, parse into records, and drop the preamble —
 /// every step of import that happens before a profile is picked.
-fn parse_records<R: Read>(mut reader: R) -> Result<(Vec<Vec<String>>, u8), Error> {
+fn parse_records<R: Read>(mut reader: R) -> Result<ParsedRecords, Error> {
     let mut bytes = Vec::new();
     reader.read_to_end(&mut bytes)?;
-    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes);
-
-    let text = match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_string(),
-        Err(_) => decode_windows1252(bytes),
-    };
+    let (text, encoding) = decode_text(&bytes);
     let delimiter = sniff_delimiter(&text);
 
     let mut csv_reader = csv::ReaderBuilder::new()
@@ -376,13 +420,16 @@ fn parse_records<R: Read>(mut reader: R) -> Result<(Vec<Vec<String>>, u8), Error
         }
         records.push(fields);
     }
-    records.drain(..skip_preamble(&records));
-    Ok((records, delimiter))
+    let preamble_dropped = skip_preamble(&records);
+    records.drain(..preamble_dropped);
+    Ok((records, delimiter, encoding, preamble_dropped))
 }
 
 fn build_import(
     records: Vec<Vec<String>>,
     delimiter: u8,
+    encoding: Encoding,
+    preamble_dropped: usize,
     profile: Option<ImportProfile>,
 ) -> Result<Import, Error> {
     let fingerprint = fingerprint(&records, delimiter).unwrap_or_default();
@@ -392,6 +439,7 @@ fn build_import(
     };
     let data = if profile.has_header && !records.is_empty() { &records[1..] } else { &records[..] };
 
+    let mut skipped_rows = preamble_dropped;
     let entries = data
         .iter()
         .filter_map(|row| {
@@ -403,6 +451,7 @@ fn build_import(
                 .collect::<Vec<_>>()
                 .join(" ");
             if description.is_empty() {
+                skipped_rows += 1;
                 return None;
             }
             Some(Entry {
@@ -416,7 +465,7 @@ fn build_import(
         })
         .collect();
 
-    Ok(Import { profile, entries, fingerprint })
+    Ok(Import { profile, entries, fingerprint, delimiter, encoding, skipped_rows })
 }
 
 /// Read entries from CSV bytes. With `profile: None` the layout is
@@ -426,8 +475,8 @@ fn build_import(
 /// (see [`skip_preamble`]) are dropped before header/column detection.
 /// Blank lines and rows with an empty description are skipped.
 pub fn read_entries<R: Read>(reader: R, profile: Option<ImportProfile>) -> Result<Import, Error> {
-    let (records, delimiter) = parse_records(reader)?;
-    build_import(records, delimiter, profile)
+    let (records, delimiter, encoding, preamble_dropped) = parse_records(reader)?;
+    build_import(records, delimiter, encoding, preamble_dropped, profile)
 }
 
 /// Like [`read_entries`], but first checks the file's layout fingerprint
@@ -439,9 +488,9 @@ pub fn read_entries_with_layouts<R: Read>(
     reader: R,
     layouts: &HashMap<String, ImportProfile>,
 ) -> Result<Import, Error> {
-    let (records, delimiter) = parse_records(reader)?;
+    let (records, delimiter, encoding, preamble_dropped) = parse_records(reader)?;
     let profile = fingerprint(&records, delimiter).and_then(|fp| layouts.get(&fp).cloned());
-    build_import(records, delimiter, profile)
+    build_import(records, delimiter, encoding, preamble_dropped, profile)
 }
 
 /// Convenience wrapper over [`read_entries`] for a file on disk.
@@ -547,6 +596,41 @@ mod tests {
         let import = read_entries(csv.as_bytes(), None).unwrap();
         assert_eq!(import.entries.len(), 2);
         assert_eq!(import.entries[0].amount, Some(-12.50));
+        assert_eq!(import.delimiter, b';');
+        assert_eq!(import.encoding, Encoding::Utf8);
+    }
+
+    #[test]
+    fn reports_windows1252_encoding_and_semicolon_delimiter() {
+        // "café" in Windows-1252: the trailing é is byte 0xE9, invalid UTF-8.
+        let bytes = b"Date;Payee;Amount\n01.02.2025;caf\xe9;-12,50\n03.02.2025;MIGROS RENENS;-8,90\n";
+        let import = read_entries(&bytes[..], None).unwrap();
+        assert_eq!(import.delimiter, b';');
+        assert_eq!(import.encoding, Encoding::Windows1252);
+        assert_eq!(import.entries[0].description, "café");
+    }
+
+    #[test]
+    fn skipped_rows_counts_preamble_and_empty_descriptions() {
+        let csv = "Account details for:,ACME\nAvailable Balance,100.00\n\
+                    Date,Description,Amount\n01.02.2025,COOP LAUSANNE,-12.50\n01.03.2025,,-3.00\n";
+        let import = read_entries(csv.as_bytes(), None).unwrap();
+        assert_eq!(import.entries.len(), 1);
+        // 2 preamble rows dropped before the header, plus 1 data row with no
+        // usable description.
+        assert_eq!(import.skipped_rows, 3);
+    }
+
+    #[test]
+    fn looks_delimited_accepts_tabular_txt_and_rejects_prose() {
+        let tabular = "01.02.2025\tCOOP LAUSANNE\t-12.50\n03.02.2025\tMIGROS RENENS\t-8.90\n";
+        assert!(looks_delimited(tabular));
+
+        let prose = "Meeting notes:\nDiscussed budget, timeline, and resources.\nFollow up next week.\n";
+        assert!(!looks_delimited(prose));
+
+        // A single line can't establish consistency, even with a delimiter.
+        assert!(!looks_delimited("just one, line, with, commas"));
     }
 
     #[test]

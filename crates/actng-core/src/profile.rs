@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::discover::FileImport;
+use crate::discover::{Dataset, FileImport};
 use crate::error::Error;
 use crate::import::ImportProfile;
 use crate::tagger::{Suggestion, Tagger};
@@ -140,58 +140,39 @@ impl Profile {
         self.tagger.remove_tag(tag);
     }
 
-    /// Apply the profile's tagger to a set of imports, partitioning results into
-    /// confident matches and those needing human review.
-    pub fn run<'a>(&self, imports: &'a [FileImport]) -> RunResult<'a> {
-        let mut sources = Vec::new();
-        let mut all_refs = Vec::new();
+    /// Insert `fingerprint -> layout` for every successful import whose
+    /// layout isn't already remembered, so a re-export from the same bank
+    /// never re-runs (or mis-runs) auto-detection. Returns how many layouts
+    /// were newly remembered. Never overwrites an existing entry.
+    pub fn remember_layouts(&mut self, imports: &[FileImport]) -> usize {
+        let mut added = 0;
         for imp in imports {
             if let Ok(import) = &imp.result {
-                all_refs.extend(import.entries.iter());
-                sources.push(imp.path.clone());
+                if !import.fingerprint.is_empty() && !self.layouts.contains_key(&import.fingerprint) {
+                    self.layouts.insert(import.fingerprint.clone(), import.profile.clone());
+                    added += 1;
+                }
             }
         }
+        added
+    }
 
-        use std::collections::HashSet;
-        use crate::normalize::normalize;
-        
-        let mut seen = HashSet::new();
-        let mut unique = Vec::new();
-        let mut dropped = 0;
-
-        for entry in all_refs {
-            let key = (
-                entry.date,
-                normalize(&entry.description).key,
-                entry.amount.map(|a| (a * 100.0).round() as i64),
-            );
-            if seen.insert(key) {
-                unique.push(entry);
-            } else {
-                dropped += 1;
-            }
-        }
-
+    /// Apply the profile's tagger to a deduplicated `Dataset`, partitioning
+    /// results into confident matches and those needing human review.
+    /// Dedup itself happens once, in `discover::collect`.
+    pub fn run<'a>(&self, dataset: &'a Dataset) -> RunResult<'a> {
         let mut tagged = Vec::new();
         let mut review = Vec::new();
 
-        for entry in unique {
+        for entry in &dataset.entries {
             if let Some(sugg) = self.suggest(&entry.description) {
                 tagged.push((entry, sugg));
             } else {
-                review.push(Review {
-                    entry,
-                    candidates: self.candidates(&entry.description),
-                });
+                review.push(Review { entry, candidates: self.candidates(&entry.description) });
             }
         }
 
-        RunResult {
-            tagged,
-            review,
-            sources,
-            duplicates_dropped: dropped,
-        }
+        RunResult { tagged, review, sources: dataset.sources.clone(), duplicates_dropped: dataset.duplicates_dropped }
     }
 }
 
@@ -265,5 +246,30 @@ mod tests {
 
         assert!(profile.tags.is_empty());
         assert!(profile.suggest("COOP LAUSANNE").is_none());
+    }
+
+    #[test]
+    fn remember_layouts_persists_detected_layouts_and_is_idempotent() {
+        use crate::discover::import_dir;
+
+        let dir = std::env::temp_dir().join(format!("actng-remember-layouts-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.csv"), "Date,Desc,Amount\n2025-01-01,Test,-10.00").unwrap();
+
+        let mut profile = Profile::new("test");
+        assert!(profile.layouts.is_empty());
+
+        let imports = import_dir(&dir, &profile).unwrap();
+        let added = profile.remember_layouts(&imports);
+        assert_eq!(added, 1);
+        assert_eq!(profile.layouts.len(), 1);
+
+        // A second run detects the same fingerprint; nothing new to add.
+        let imports2 = import_dir(&dir, &profile).unwrap();
+        let added2 = profile.remember_layouts(&imports2);
+        assert_eq!(added2, 0);
+        assert_eq!(profile.layouts.len(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

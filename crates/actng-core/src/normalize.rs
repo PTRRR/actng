@@ -68,7 +68,7 @@ pub fn normalize(text: &str) -> Normalized {
     text = RE_DATE.replace_all(&text, " ").into_owned();
     text = RE_DECIMAL.replace_all(&text, " ").into_owned();
 
-    let mut tokens: Vec<String> = RE_WORD
+    let tokens: Vec<String> = RE_WORD
         .find_iter(&text)
         .map(|m| m.as_str().to_string())
         .filter(|t| t.chars().count() >= 2)

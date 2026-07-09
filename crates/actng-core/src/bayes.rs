@@ -93,6 +93,11 @@ impl NaiveBayes {
         self.total_docs == 0
     }
 
+    /// Number of documents trained under `tag`, or 0 if it has none.
+    pub fn doc_count(&self, tag: &str) -> u64 {
+        self.doc_counts.get(tag).copied().unwrap_or(0)
+    }
+
     /// Rewrite all training data recorded under `old` to `new`, merging into
     /// `new`'s counts if it already has training data of its own.
     pub fn rename_tag(&mut self, old: &str, new: &str) {
@@ -152,5 +157,17 @@ mod tests {
         assert!(nb.classify(&toks("anything")).is_empty());
         nb.train(&toks("coop lausanne"), "groceries");
         assert!(nb.classify(&toks("completely unseen words")).is_empty());
+    }
+
+    #[test]
+    fn doc_count_tracks_training_volume() {
+        let mut nb = NaiveBayes::new();
+        assert_eq!(nb.doc_count("groceries"), 0);
+        nb.train(&toks("coop lausanne"), "groceries");
+        nb.train(&toks("migros renens"), "groceries");
+        nb.train(&toks("grimper lausanne"), "climbing");
+        assert_eq!(nb.doc_count("groceries"), 2);
+        assert_eq!(nb.doc_count("climbing"), 1);
+        assert_eq!(nb.doc_count("unknown"), 0);
     }
 }
