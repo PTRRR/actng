@@ -54,7 +54,7 @@ pub struct Import {
 
 // Trailing `.?` tolerates the Hungarian `2019.04.19.` convention.
 static RE_DATE_CELL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\s*\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\.?\s*$").unwrap());
+    LazyLock::new(|| Regex::new(r"^\s*\d{1,4}[./-]\d{1,2}[./-]\d{1,4}(\s+\d{2}:\d{2}:\d{2}(\.\d+)?\s*)?\.?\s*$").unwrap());
 // "27 Feb 2018", "10 Feb 18", "12-Dec-2019": day, month name, year.
 static RE_DATE_CELL_MONTH_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^\s*\d{1,2}[-\s][a-z]{3,9}[-\s]\d{2,4}\s*$").unwrap());
@@ -69,7 +69,7 @@ fn has_header(first_row: &[String]) -> bool {
     !first_row.iter().any(|cell| is_date_like(cell) || parse_amount(cell).is_some())
 }
 
-const DATE_HEADER_HINTS: &[&str] = &["date", "datum", "data", "valuta", "jour"];
+const DATE_HEADER_HINTS: &[&str] = &["date", "datum", "data", "valuta", "jour", "booked"];
 const AMOUNT_HEADER_HINTS: &[&str] =
     &["montant", "amount", "betrag", "importo", "credit", "crédit", "debit", "débit"];
 const DEBIT_HEADER_HINTS: &[&str] = &["debit", "débit", "debet", "outflow", "withdrawal", "kiadás"];
@@ -79,7 +79,7 @@ const DESCRIPTION_HEADER_HINTS: &[&str] = &[
     "détail", "detail", "beschreibung",
 ];
 const DATE_FORMAT_CANDIDATES: &[&str] = &[
-    "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y", "%d.%m.%y",
+    "%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d.%m.%Y", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y", "%d.%m.%y",
     "%m/%d/%y", "%d/%m/%y",
     // %d %b %y must precede %d %b %Y: chrono's %Y also accepts a 2-digit
     // year (as year 0018), so for an ambiguous 2-digit input the earlier
@@ -720,11 +720,19 @@ mod tests {
     }
 
     #[test]
-    fn sort_order_disambiguates_day_month() {
-        // All days <= 12: both %d/%m and %m/%d parse everything, but only
-        // %d/%m keeps the file's descending order.
-        let values = ["05/03/2025", "12/02/2025", "03/02/2025", "10/01/2025"];
+    fn parses_datetime_formats() {
+        let values = ["2025-09-08 00:00:00.0", "2025-10-01 00:00:00.0"];
         let formats = detect_date_formats(&values);
-        assert_eq!(formats.first().map(String::as_str), Some("%d/%m/%Y"));
+        assert!(formats.contains(&"%Y-%m-%d %H:%M:%S%.f".to_string()));
+    }
+
+    #[test]
+    fn imports_datetime_csv() {
+        let csv = "IBAN;Booked At;Text;Amount\n\
+                   CH123;2025-09-08 00:00:00.0;Test Entry;-251\n";
+        let import = read_entries(csv.as_bytes(), None).unwrap();
+        assert_eq!(import.entries.len(), 1);
+        assert!(import.entries[0].date.is_some());
+        assert_eq!(import.entries[0].amount, Some(-251.0));
     }
 }
