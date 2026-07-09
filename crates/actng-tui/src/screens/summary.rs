@@ -15,6 +15,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let mut tag_totals = HashMap::new();
     for (i, entry) in app.dataset.entries.iter().enumerate() {
+        if let Some(file_idx) = app.file_filter {
+            if app.dataset.source[i] != file_idx {
+                continue;
+            }
+        }
         if let Some(sugg) = &app.suggestions[i] {
             let tag = sugg.tag.clone();
             let amount = entry.amount.unwrap_or(0.0);
