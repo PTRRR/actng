@@ -19,18 +19,26 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
 fn render_profile_card(app: &App, frame: &mut Frame, area: Rect) {
     let (exact, bayes, review) = app.tagged_count();
-    let trained_keys: usize = app.profile.tagger.stats().iter().map(|s| s.exact_keys).sum();
+    let trained_keys: usize = app
+        .profile
+        .tagger
+        .stats()
+        .iter()
+        .map(|s| s.exact_keys)
+        .sum();
     let lines = vec![
         Line::from(format!("name:     {}", app.profile.name)),
         Line::from(format!("version:  {}", app.profile.version)),
         Line::from(format!("tags:     {}", app.profile.tags.len())),
-        Line::from(format!("layouts:  {} remembered", app.profile.layouts.len())),
+        Line::from(format!(
+            "layouts:  {} remembered",
+            app.profile.layouts.len()
+        )),
         Line::from(""),
         Line::from(format!("entries:  {}", app.dataset.entries.len())),
         Line::from(format!("  exact:    {exact}")),
         Line::from(format!("  bayes:    {bayes}")),
         Line::from(format!("  review:   {review}")),
-        Line::from(format!("duplicates dropped: {}", app.dataset.duplicates_dropped)),
         Line::from(format!("exact-match keys trained: {trained_keys}")),
         Line::from(""),
         Line::from("press 2 to review \u{b7} e to export"),
@@ -50,7 +58,10 @@ fn render_files(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
     for (path, err) in &app.dataset.failures {
-        items.push(ListItem::new(format!("{}  FAILED: {}", path.display(), err)).style(Style::default().fg(Color::Red)));
+        items.push(
+            ListItem::new(format!("{}  FAILED: {}", path.display(), err))
+                .style(Style::default().fg(Color::Red)),
+        );
     }
     if items.is_empty() {
         items.push(ListItem::new("no bank files discovered"));

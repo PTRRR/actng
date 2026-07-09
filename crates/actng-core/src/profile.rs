@@ -37,7 +37,6 @@ pub struct RunResult<'a> {
     pub tagged: Vec<(&'a crate::entry::Entry, Suggestion)>,
     pub review: Vec<Review<'a>>,
     pub sources: Vec<PathBuf>,
-    pub duplicates_dropped: usize,
 }
 
 /// Everything the user has taught the tool, in one serializable artifact:
@@ -178,7 +177,7 @@ impl Profile {
             }
         }
 
-        RunResult { tagged, review, sources: dataset.sources.clone(), duplicates_dropped: dataset.duplicates_dropped }
+        RunResult { tagged, review, sources: dataset.sources.clone() }
     }
 }
 

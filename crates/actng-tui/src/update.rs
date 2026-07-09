@@ -62,6 +62,12 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
                 .unwrap_or(0);
             app.screen = Screen::ALL[(idx + 1) % Screen::ALL.len()];
         }
+        KeyCode::Char(c) if c.is_ascii_digit() && c != '0' && app.screen != Screen::Review => {
+            let idx = c.to_digit(10).unwrap() as usize;
+            if idx > 0 && idx <= Screen::ALL.len() {
+                app.screen = Screen::ALL[idx - 1];
+            }
+        }
         _ => {}
     }
 
@@ -519,7 +525,6 @@ mod tests {
             source: vec![0; n],
             sources: vec![PathBuf::from("test.csv")],
             failures: vec![],
-            duplicates_dropped: 0,
         };
         App::new(Profile::new("test"), PathBuf::from("test-profile.json"), PathBuf::from("."), dataset, vec![])
     }

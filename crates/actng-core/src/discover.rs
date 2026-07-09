@@ -88,16 +88,16 @@ pub fn import_dir(path: impl AsRef<Path>, profile: &Profile) -> Result<Vec<FileI
     Ok(results)
 }
 
-/// The owned, deduplicated result of importing a whole directory: every
-/// entry that survived dedup, which source file it came from, the files
-/// that failed to import, and how many duplicates were dropped.
+/// Result of importing a whole directory: every
+/// entry from the files, which source file it came from, the files
+/// that failed to import.
 ///
 /// Unlike a borrowed `&[FileImport]`, a `Dataset` can be held onto and
 /// re-queried (re-suggest after every training step, write an export) once
 /// the originating `Import`s have been consumed.
 #[derive(Debug)]
 pub struct Dataset {
-    /// Deduplicated entries, in file order.
+    /// Entries, in file order.
     pub entries: Vec<Entry>,
     /// Parallel to `entries`: index into `sources` for where it came from.
     pub source: Vec<usize>,
@@ -105,33 +105,15 @@ pub struct Dataset {
     pub sources: Vec<PathBuf>,
     /// Files that failed to import, with the reason.
     pub failures: Vec<(PathBuf, Error)>,
-    pub duplicates_dropped: usize,
 }
 
-/// A dedup key stable across dates and card numbers for the same merchant:
-/// (date, normalized description key, amount in integer cents).
-type DedupKey = (Option<chrono::NaiveDate>, String, Option<i64>);
-
-fn dedup_key(entry: &Entry) -> DedupKey {
-    (
-        entry.date,
-        normalize(&entry.description).key,
-        entry.amount.map(|a| (a * 100.0).round() as i64),
-    )
-}
-
-/// Consume a batch of `FileImport`s into a single deduplicated `Dataset`.
-/// Per-file failures are collected rather than dropped; entries across all
-/// successful files are deduplicated together (see `dedup_key`).
+/// Consume a batch of `FileImport`s into a single `Dataset`.
+/// Per-file failures are collected rather than dropped.
 pub fn collect(imports: Vec<FileImport>) -> Dataset {
-    use std::collections::HashSet;
-
     let mut entries = Vec::new();
     let mut source = Vec::new();
     let mut sources = Vec::new();
     let mut failures = Vec::new();
-    let mut seen = HashSet::new();
-    let mut dropped = 0;
 
     for imp in imports {
         let FileImport { path, result } = imp;
@@ -140,12 +122,8 @@ pub fn collect(imports: Vec<FileImport>) -> Dataset {
                 let idx = sources.len();
                 sources.push(path);
                 for entry in import.entries {
-                    if seen.insert(dedup_key(&entry)) {
-                        entries.push(entry);
-                        source.push(idx);
-                    } else {
-                        dropped += 1;
-                    }
+                    entries.push(entry);
+                    source.push(idx);
                 }
             }
             Err(e) => failures.push((path, Error::Other(e))),
@@ -157,7 +135,6 @@ pub fn collect(imports: Vec<FileImport>) -> Dataset {
         source,
         sources,
         failures,
-        duplicates_dropped: dropped,
     }
 }
 
@@ -264,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_deduplicates_entries_across_files() {
+    fn collect_keeps_all_entries_including_duplicates() {
         use crate::entry::Entry;
         use chrono::NaiveDate;
 
@@ -283,7 +260,6 @@ mod tests {
             ],
             "a",
         );
-        // Same merchant/date/amount as one entry in file a: a cross-file duplicate.
         let import_b = test_import(vec![make_entry("COOP LAUSANNE 456", -12.50)], "b");
 
         let imports = vec![
@@ -300,18 +276,13 @@ mod tests {
         let dataset = collect(imports);
         assert_eq!(
             dataset.entries.len(),
-            2,
-            "cross-file duplicate should be dropped"
-        );
-        assert_eq!(dataset.duplicates_dropped, 1);
-        assert_eq!(
-            dataset.sources,
-            vec![PathBuf::from("a.csv"), PathBuf::from("b.csv")]
+            3,
+            "should keep all entries"
         );
         assert_eq!(
             dataset.source,
-            vec![0, 0],
-            "both surviving entries came from file a"
+            vec![0, 0, 1],
+            "source indices should match file order"
         );
         assert!(dataset.failures.is_empty());
     }

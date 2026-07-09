@@ -63,7 +63,7 @@ fn profile_run_partitions_results() {
 }
 
 #[test]
-fn profile_run_deduplicates_identical_entries() {
+fn profile_run_keeps_all_entries() {
     let import = read_entries_from_path(example_path(), None).unwrap();
     let profile = actng_core::Profile::new("test");
 
@@ -73,19 +73,8 @@ fn profile_run_deduplicates_identical_entries() {
     let dataset = actng_core::collect(vec![file_import_1, file_import_2]);
     let result = profile.run(&dataset);
 
-    // The file itself might have internal duplicates. 
-    // The a-priori unique count for one file:
-    let mut seen = std::collections::HashSet::new();
-    let mut unique_count = 0;
-    for e in &import.entries {
-        let key = (e.date, actng_core::normalize(&e.description).key, e.amount.map(|a| (a * 100.0).round() as i64));
-        if seen.insert(key) {
-            unique_count += 1;
-        }
-    }
-
     let total_entries = result.tagged.len() + result.review.len();
-    assert_eq!(total_entries, unique_count);
+    assert_eq!(total_entries, import.entries.len() * 2);
 }
 
 

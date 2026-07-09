@@ -40,7 +40,6 @@ pub fn view(app: &App, frame: &mut Frame) {
 
 fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
     let (exact, bayes, review) = app.tagged_count();
-    let dup = app.dataset.duplicates_dropped;
     let save_tick = if app.last_saved.is_some() { "\u{2713} saved" } else { "" };
 
     let mut spans = vec![
@@ -49,7 +48,7 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         Span::raw(format!("{} tags ", app.profile.tags.len())),
         Span::raw("\u{2502} "),
         Span::styled(
-            format!("tagged {} ({} exact, {} bayes) \u{b7} review {} \u{b7} dup {} ", exact + bayes, exact, bayes, review, dup),
+            format!("tagged {} ({} exact, {} bayes) \u{b7} review {} ", exact + bayes, exact, bayes, review),
             Style::default().fg(Color::Cyan),
         ),
         Span::raw("\u{2502} "),

@@ -74,8 +74,7 @@ fn tag_exits_2_and_prints_summary_when_review_queue_nonempty() {
         .arg("tag")
         .assert()
         .code(2)
-        .stdout(predicate::str::contains("need review"))
-        .stdout(predicate::str::contains("duplicates skipped"));
+        .stdout(predicate::str::contains("need review"));
 }
 
 #[test]

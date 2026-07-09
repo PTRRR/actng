@@ -340,12 +340,12 @@ fn run() -> anyhow::Result<ExitCode> {
                 .iter()
                 .filter(|(_, s)| s.source == Source::Bayes)
                 .count();
-            let summary = format!(
-                "{} tagged ({exact} exact, {bayes} bayes), {} need review, {} duplicates skipped",
-                result.tagged.len(),
-                result.review.len(),
-                result.duplicates_dropped,
-            );
+                let summary = format!(
+                    "{} tagged ({exact} exact, {bayes} bayes), {} need review",
+                    result.tagged.len(),
+                    result.review.len(),
+                );
+
             if format == "table" {
                 println!("\n{summary}");
             } else {
