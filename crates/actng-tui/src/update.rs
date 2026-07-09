@@ -227,7 +227,11 @@ fn next_entry_filter(app: &App) -> EntryFilter {
 
 pub fn filtered_entry_indices(app: &App) -> Vec<usize> {
     let search = app.entries_search.as_deref().unwrap_or("").to_lowercase();
-    (0..app.dataset.entries.len())
+    let mut indices: Vec<usize> = (0..app.dataset.entries.len()).collect();
+    indices.sort_by(|&a, &b| app.dataset.entries[b].date.cmp(&app.dataset.entries[a].date));
+
+    indices
+        .into_iter()
         .filter(|&i| {
             if let Some(file_idx) = app.file_filter {
                 if app.dataset.source[i] != file_idx {
