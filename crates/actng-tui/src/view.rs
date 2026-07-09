@@ -56,6 +56,16 @@ fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
         Span::styled(save_tick, Style::default().fg(Color::Green)),
     ];
 
+    if let Some(file_idx) = app.file_filter {
+        if let Some(detail) = app.file_details.get(file_idx) {
+            spans.push(Span::raw(" \u{2502} "));
+            spans.push(Span::styled(
+                format!("file: {}", detail.path.file_name().unwrap_or_default().to_string_lossy()),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+    }
+
     if let Some(toast) = &app.toast {
         spans.push(Span::raw(" \u{2502} "));
         spans.push(Span::styled(toast.message.clone(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));

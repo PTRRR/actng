@@ -19,7 +19,7 @@ struct Cli {
     directory: PathBuf,
 
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -144,7 +144,12 @@ fn run() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse();
     let profile_path = resolve_profile_path(cli.profile.as_deref());
 
-    let exit_code = match cli.command {
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => Commands::Tui { directory: None },
+    };
+
+    let exit_code = match command {
         Commands::Init { name, tags } => {
             if profile_path.exists() {
                 anyhow::bail!("Profile already exists at {:?}", profile_path);

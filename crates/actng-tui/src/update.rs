@@ -114,23 +114,33 @@ fn handle_review_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
     }
     app.review_cursor = app.review_cursor.min(queue.len() - 1);
 
+    // Apply file filter to the review queue.
+    let filtered_queue: Vec<usize> = if let Some(file_idx) = app.file_filter {
+        queue.into_iter().filter(|&i| app.dataset.source[i] == file_idx).collect()
+    } else {
+        queue
+    };
+
+    if filtered_queue.is_empty() {
+        return vec![];
+    }
+    app.review_cursor = app.review_cursor.min(filtered_queue.len() - 1);
+
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
-            app.review_cursor = (app.review_cursor + 1).min(queue.len() - 1);
+            app.review_cursor = (app.review_cursor + 1).min(filtered_queue.len() - 1);
         }
-        KeyCode::Char('k') | KeyCode::Up => {
-            app.review_cursor = app.review_cursor.saturating_sub(1);
-        }
+        KeyCode::Char('k') | KeyCode::Up => app.review_cursor = app.review_cursor.saturating_sub(1),
         KeyCode::Char('s') => {
-            app.review_cursor = (app.review_cursor + 1) % queue.len();
+            app.review_cursor = (app.review_cursor + 1) % filtered_queue.len();
         }
         KeyCode::Char('t') | KeyCode::Char('n') | KeyCode::Enter => {
-            let entry_idx = queue[app.review_cursor];
+            let entry_idx = filtered_queue[app.review_cursor];
             app.modal = Some(Modal::Picker(Picker::new(PickerContext::Tag { entry_idx })));
         }
         KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
             let n = c.to_digit(10).unwrap() as usize;
-            let entry_idx = queue[app.review_cursor];
+            let entry_idx = filtered_queue[app.review_cursor];
             let description = app.dataset.entries[entry_idx].description.clone();
             let candidates = app.profile.candidates(&description);
             if let Some((tag, _)) = candidates.get(n - 1) {
@@ -218,6 +228,14 @@ fn next_entry_filter(app: &App) -> EntryFilter {
 pub fn filtered_entry_indices(app: &App) -> Vec<usize> {
     let search = app.entries_search.as_deref().unwrap_or("").to_lowercase();
     (0..app.dataset.entries.len())
+        .filter(|&i| {
+            if let Some(file_idx) = app.file_filter {
+                if app.dataset.source[i] != file_idx {
+                    return false;
+                }
+            }
+            true
+        })
         .filter(|&i| match &app.entries_filter {
             EntryFilter::All => true,
             EntryFilter::Tagged => app.suggestions[i].is_some(),
@@ -333,9 +351,30 @@ fn handle_files_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
             app.files_cursor = (app.files_cursor + 1).min(total - 1)
         }
         KeyCode::Char('k') | KeyCode::Up => app.files_cursor = app.files_cursor.saturating_sub(1),
-        KeyCode::Enter if app.files_cursor >= app.file_details.len() => {
-            let (_, err) = &app.dataset.failures[app.files_cursor - app.file_details.len()];
-            app.modal = Some(Modal::Error(err.to_string()));
+        KeyCode::Enter => {
+            if app.files_cursor < app.file_details.len() {
+                if let Some(current) = app.file_filter {
+                    if current == app.files_cursor {
+                        app.file_filter = None;
+                        app.set_toast("filter cleared");
+                    } else {
+                        app.file_filter = Some(app.files_cursor);
+                        app.set_toast(format!(
+                            "filtering by {}",
+                            app.file_details[app.files_cursor].path.file_name().unwrap_or_default().to_string_lossy()
+                        ));
+                    }
+                } else {
+                    app.file_filter = Some(app.files_cursor);
+                    app.set_toast(format!(
+                        "filtering by {}",
+                        app.file_details[app.files_cursor].path.file_name().unwrap_or_default().to_string_lossy()
+                    ));
+                }
+            } else if app.files_cursor >= app.file_details.len() {
+                let (_, err) = &app.dataset.failures[app.files_cursor - app.file_details.len()];
+                app.modal = Some(Modal::Error(err.to_string()));
+            }
         }
         _ => {}
     }

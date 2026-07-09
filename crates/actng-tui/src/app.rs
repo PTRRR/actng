@@ -219,6 +219,8 @@ pub struct App {
 
     // Files screen state.
     pub files_cursor: usize,
+    /// Index of the currently selected file for filtering. None means all files.
+    pub file_filter: Option<usize>,
 
     // Tags screen state.
     pub tags_cursor: usize,
@@ -264,6 +266,7 @@ impl App {
         entries_search: None,
         entries_state: TableState::default(),
         files_cursor: 0,
+        file_filter: None,
 
             tags_cursor: 0,
             tags_sort: TagSort::Name,
