@@ -29,6 +29,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
         let date = entry.date.map(|d| d.to_string()).unwrap_or_else(|| "?".to_string());
         let amount = entry.amount.map(|a| format!("{a:.2}")).unwrap_or_default();
+        let total: f64 = indices.iter().filter_map(|&idx| app.dataset.entries[idx].amount).sum();
         let (tag_text, tag_style) = match &app.suggestions[entry_idx] {
             Some(s) if s.source == actng_core::Source::Exact => (s.tag.clone(), Style::default().fg(Color::Green)),
             Some(s) => (s.tag.clone(), Style::default().fg(Color::Yellow)),
@@ -44,6 +45,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             Line::from(vec![
                 Span::raw("Tag: "),
                 Span::styled(tag_text, tag_style),
+                Span::raw(format!("  Total: {total:.2}")),
             ]),
         ];
 

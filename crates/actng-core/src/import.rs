@@ -461,12 +461,19 @@ fn build_import(
             continue;
         }
 
-        if date.is_none() && amount.is_none() {
+        if amount.is_none() {
             if let Some(last) = entries.last_mut() {
-                if !last.description.is_empty() {
+                let row_desc = profile
+                    .description_columns
+                    .iter()
+                    .map(|&i| cell(row, i).trim())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !last.description.is_empty() && !row_desc.is_empty() {
                     last.description.push(' ');
                 }
-                last.description.push_str(&description);
+                last.description.push_str(&row_desc);
                 last.raw.push(row.clone());
             } else {
                 skipped_rows += 1;
@@ -727,12 +734,17 @@ mod tests {
     }
 
     #[test]
-    fn imports_datetime_csv() {
-        let csv = "IBAN;Booked At;Text;Amount\n\
-                   CH123;2025-09-08 00:00:00.0;Test Entry;-251\n";
+    fn collapses_provided_csv_rows() {
+        let csv = "IBAN,Booked At,Text,Credit/Debit Amount,Balance,Valuta Date
+CH358,2025-09-08 00:00:00.0,Achat HOTEL LA VETTA 04.09.2025 08:32 No carte Visa Debit 427347xxxxxx8189 EUR 253.04 taux de change 0.9515,-243.78,11031,2025-09-08 00:00:00.0
+,2025-09-08 00:00:00.0,inclus taxe pour achat à l'étranger CHF 3.01,,,2025-09-08 00:00:00.0
+CH358,2025-09-22 00:00:00.0,Ordre permanent Pietro Alberti,-200,10796.7,2025-09-22 00:00:00.0
+,,1006 Lausanne CHF 200.00,,,";
         let import = read_entries(csv.as_bytes(), None).unwrap();
-        assert_eq!(import.entries.len(), 1);
-        assert!(import.entries[0].date.is_some());
-        assert_eq!(import.entries[0].amount, Some(-251.0));
+        assert_eq!(import.entries.len(), 2);
+        assert!(import.entries[0].description.contains("inclus taxe pour achat à l'étranger"));
+        assert!(import.entries[1].description.contains("1006 Lausanne"));
     }
+
+
 }
