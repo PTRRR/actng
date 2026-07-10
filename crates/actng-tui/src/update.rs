@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::actions::{self, picker_items};
 use crate::app::{
     App, Cmd, Confirm, ConfirmContext, EntryFilter, ExportField, ExportForm, Modal, Msg, Picker,
-    PickerContext, Screen, TagSort, TextPrompt, TextPromptPurpose,
+    PickerContext, Screen, TagSort, TextPrompt, TextPromptPurpose, UndoRecord,
 };
 
 const TOAST_LIFETIME: Duration = Duration::from_secs(3);
@@ -138,6 +138,10 @@ fn handle_review_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
             let entry_idx = filtered_queue[app.review_cursor];
             app.modal = Some(Modal::Picker(Picker::new(PickerContext::Tag { entry_idx })));
         }
+        KeyCode::Char('x') => {
+            let entry_idx = filtered_queue[app.review_cursor];
+            app.modal = Some(Modal::Picker(Picker::new(PickerContext::Override { entry_idx })));
+        }
         KeyCode::Char(c) if c.is_ascii_digit() && c != '0' => {
             let n = c.to_digit(10).unwrap() as usize;
             let entry_idx = filtered_queue[app.review_cursor];
@@ -200,6 +204,10 @@ fn handle_entries_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
             let entry_idx = indices[app.entries_cursor];
             app.modal = Some(Modal::Picker(Picker::new(PickerContext::Tag { entry_idx })));
         }
+        KeyCode::Char('x') if !indices.is_empty() => {
+            let entry_idx = indices[app.entries_cursor];
+            app.modal = Some(Modal::Picker(Picker::new(PickerContext::Override { entry_idx })));
+        }
         _ => {}
     }
     vec![]
@@ -210,7 +218,8 @@ fn next_entry_filter(app: &App) -> EntryFilter {
     match &app.entries_filter {
         EntryFilter::All => EntryFilter::Tagged,
         EntryFilter::Tagged => EntryFilter::Review,
-        EntryFilter::Review => tags
+        EntryFilter::Review => EntryFilter::Overridden,
+        EntryFilter::Overridden => tags
             .first()
             .cloned()
             .map(EntryFilter::Tag)
@@ -244,6 +253,9 @@ pub fn filtered_entry_indices(app: &App) -> Vec<usize> {
             EntryFilter::All => true,
             EntryFilter::Tagged => app.suggestions[i].is_some(),
             EntryFilter::Review => app.suggestions[i].is_none(),
+            EntryFilter::Overridden => {
+                app.suggestions[i].as_ref().is_some_and(|s| s.source == actng_core::Source::Override)
+            }
             EntryFilter::Tag(tag) => app.suggestions[i].as_ref().is_some_and(|s| &s.tag == tag),
         })
         .filter(|&i| {
@@ -299,11 +311,17 @@ fn handle_tags_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
                 .find(|s| s.tag == tag)
                 .map(|s| s.trained_docs)
                 .unwrap_or(0);
+            let overrides = app.profile.overrides.iter().filter(|o| o.tag == tag).count();
             let plural = if trained == 1 { "" } else { "s" };
-            app.modal = Some(Modal::Confirm(Confirm {
-                message: format!("Delete '{tag}' and its {trained} trained document{plural}? This cannot be undone."),
-                context: ConfirmContext::DeleteTag(tag),
-            }));
+            let message = if overrides > 0 {
+                let override_plural = if overrides == 1 { "" } else { "s" };
+                format!(
+                    "Delete '{tag}', its {trained} trained document{plural} and {overrides} exception{override_plural}? This cannot be undone."
+                )
+            } else {
+                format!("Delete '{tag}' and its {trained} trained document{plural}? This cannot be undone.")
+            };
+            app.modal = Some(Modal::Confirm(Confirm { message, context: ConfirmContext::DeleteTag(tag) }));
         }
         _ => {}
     }
@@ -503,6 +521,7 @@ fn handle_modal_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
 fn apply_picker_choice(app: &mut App, context: &PickerContext, name: String) -> Vec<Cmd> {
     match context {
         PickerContext::Tag { entry_idx } => confirm_and_report(app, *entry_idx, &name),
+        PickerContext::Override { entry_idx } => confirm_override_and_report(app, *entry_idx, &name),
         PickerContext::Category { tag } => match app.profile.set_category(tag, name) {
             Ok(()) => vec![Cmd::SaveProfile],
             Err(e) => {
@@ -511,6 +530,18 @@ fn apply_picker_choice(app: &mut App, context: &PickerContext, name: String) -> 
             }
         },
     }
+}
+
+/// Confirm `tag` as a per-entry exception. Unlike `confirm_and_report`, this
+/// never reports a "+N resolved" count — exceptions never cascade to
+/// normalized-key siblings, that's the point.
+fn confirm_override_and_report(app: &mut App, entry_idx: usize, tag: &str) -> Vec<Cmd> {
+    let Some(rec) = actions::confirm_override(app, entry_idx, tag) else {
+        return vec![];
+    };
+    app.undo.push(rec);
+    app.set_toast(format!("{tag} \u{2713} (exception)"));
+    vec![Cmd::SaveProfile]
 }
 
 fn apply_text_prompt(app: &mut App, prompt: &TextPrompt) -> Vec<Cmd> {
@@ -701,7 +732,10 @@ mod tests {
             .filter(|&&i| i != entry_idx && !after.contains(&i))
             .count();
 
-        assert_eq!(rec.description, desc);
+        match &rec {
+            UndoRecord::Learn { description, .. } => assert_eq!(description, &desc),
+            UndoRecord::Override { .. } => panic!("expected a Learn undo record"),
+        }
         assert_eq!(
             resolved, 1,
             "the sibling with the same normalized key should resolve too"
@@ -741,6 +775,8 @@ mod tests {
         assert_eq!(app.entries_filter, EntryFilter::Tagged);
         update(&mut app, Msg::Key(key('f')));
         assert_eq!(app.entries_filter, EntryFilter::Review);
+        update(&mut app, Msg::Key(key('f')));
+        assert_eq!(app.entries_filter, EntryFilter::Overridden);
         update(&mut app, Msg::Key(key('f')));
         assert_eq!(
             app.entries_filter,
@@ -846,5 +882,100 @@ mod tests {
             other => panic!("expected a single WriteExport cmd, got {other:?}"),
         }
         assert!(app.modal.is_none());
+    }
+
+    #[test]
+    fn review_x_tags_as_exception_without_training_the_tagger() {
+        let mut app = test_app(vec![
+            entry("COOP LAUSANNE 1", -1.0),
+            entry("COOP LAUSANNE 2", -2.0),
+        ]);
+        app.screen = Screen::Review;
+
+        let entry_idx = app.review_queue()[0];
+        update(&mut app, Msg::Key(key('x')));
+        assert!(matches!(app.modal, Some(Modal::Picker(_))));
+        for c in "gift".chars() {
+            update(&mut app, Msg::Key(key(c)));
+        }
+        let cmds = update(&mut app, Msg::Key(keycode(KeyCode::Enter)));
+        assert!(matches!(cmds.as_slice(), [Cmd::SaveProfile]));
+
+        let sugg = app.suggestions[entry_idx].clone().unwrap();
+        assert_eq!(sugg.tag, "gift");
+        assert_eq!(sugg.source, actng_core::Source::Override);
+        assert!(
+            app.profile.suggest("COOP LAUSANNE 1").is_none(),
+            "an exception must not train the tagger"
+        );
+        assert_eq!(app.undo.len(), 1);
+    }
+
+    #[test]
+    fn entries_x_tags_the_selected_entry_as_exception() {
+        let mut app = test_app(vec![entry("COOP LAUSANNE", -1.0)]);
+        app.profile.learn("COOP LAUSANNE", "groceries");
+        app.recompute();
+        app.screen = Screen::Entries;
+
+        update(&mut app, Msg::Key(key('x')));
+        for c in "gift".chars() {
+            update(&mut app, Msg::Key(key(c)));
+        }
+        update(&mut app, Msg::Key(keycode(KeyCode::Enter)));
+
+        assert_eq!(app.suggestions[0].as_ref().unwrap().tag, "gift");
+        assert_eq!(app.suggestions[0].as_ref().unwrap().source, actng_core::Source::Override);
+    }
+
+    #[test]
+    fn undo_reverses_an_exception_and_restores_a_replaced_one() {
+        let mut app = test_app(vec![entry("COOP LAUSANNE", -1.0)]);
+        app.screen = Screen::Review;
+
+        let entry_idx = app.review_queue()[0];
+        let e = app.dataset.entries[entry_idx].clone();
+        app.profile.set_override(&e, "groceries");
+        app.recompute();
+
+        // Re-override through the normal picker flow, replacing "groceries".
+        update(&mut app, Msg::Key(key('a'))); // retag mode, so the already-overridden entry is reachable
+        update(&mut app, Msg::Key(key('x')));
+        for c in "gift".chars() {
+            update(&mut app, Msg::Key(key(c)));
+        }
+        update(&mut app, Msg::Key(keycode(KeyCode::Enter)));
+        assert_eq!(app.profile.override_for(&e).unwrap().tag, "gift");
+
+        let cmds = update(&mut app, Msg::Key(key('u')));
+        assert!(matches!(cmds.as_slice(), [Cmd::SaveProfile]));
+        assert_eq!(
+            app.profile.override_for(&e).unwrap().tag,
+            "groceries",
+            "undo restores the override that was replaced"
+        );
+    }
+
+    #[test]
+    fn retag_via_enter_clears_a_stale_override() {
+        let mut app = test_app(vec![entry("COOP LAUSANNE", -1.0)]);
+        let entry_idx = 0;
+        let e = app.dataset.entries[entry_idx].clone();
+        app.profile.set_override(&e, "gift");
+        app.recompute();
+        app.screen = Screen::Entries;
+
+        assert_eq!(app.suggestions[0].as_ref().unwrap().source, actng_core::Source::Override);
+
+        update(&mut app, Msg::Key(keycode(KeyCode::Enter)));
+        for c in "groceries".chars() {
+            update(&mut app, Msg::Key(key(c)));
+        }
+        update(&mut app, Msg::Key(keycode(KeyCode::Enter)));
+
+        assert!(app.profile.override_for(&e).is_none(), "retag clears the exception");
+        let sugg = app.suggestions[0].as_ref().unwrap();
+        assert_eq!(sugg.tag, "groceries");
+        assert_eq!(sugg.source, actng_core::Source::Exact);
     }
 }

@@ -9,6 +9,8 @@ use crate::normalize::normalize;
 /// Where a suggestion came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Source {
+    /// A per-entry exception, pinned by the user without training the tagger.
+    Override,
     /// The normalized token set was tagged before — deterministic recall.
     Exact,
     /// Probabilistic suggestion from the Naive Bayes classifier.

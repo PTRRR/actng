@@ -131,7 +131,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         &mut list_state,
     );
 
-    let help = "1-9 confirm \u{b7} t/Enter picker \u{b7} n new tag \u{b7} s skip \u{b7} u undo \u{b7} a all-entries";
+    let help = "1-9 confirm \u{b7} t picker \u{b7} n new \u{b7} x exception \u{b7} s skip \u{b7} u undo \u{b7} a all";
     frame.render_widget(
         Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
         chunks[2],

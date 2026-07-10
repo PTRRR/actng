@@ -30,12 +30,8 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         let date = entry.date.map(|d| d.to_string()).unwrap_or_else(|| "?".to_string());
         let amount = entry.amount.map(|a| format!("{a:.2}")).unwrap_or_default();
         let total: f64 = indices.iter().filter_map(|&idx| app.dataset.entries[idx].amount).sum();
-        let (tag_text, tag_style) = match &app.suggestions[entry_idx] {
-            Some(s) if s.source == actng_core::Source::Exact => (s.tag.clone(), Style::default().fg(Color::Green)),
-            Some(s) => (s.tag.clone(), Style::default().fg(Color::Yellow)),
-            None => ("(review)".to_string(), Style::default().fg(Color::Red)),
-        };
-        
+        let (tag_text, tag_style) = tag_display(&app.suggestions[entry_idx]);
+
         let header_lines = vec![
             Line::from(vec![
                 Span::raw(format!("{date}   ")),
@@ -66,6 +62,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         EntryFilter::All => "all".to_string(),
         EntryFilter::Tagged => "tagged".to_string(),
         EntryFilter::Review => "review".to_string(),
+        EntryFilter::Overridden => "overridden".to_string(),
         EntryFilter::Tag(t) => format!("tag:{t}"),
     };
 
@@ -79,11 +76,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
             let e = &app.dataset.entries[idx];
             let date = e.date.map(|d| d.to_string()).unwrap_or_else(|| "?".to_string());
             let amount = e.amount.map(|a| format!("{a:.2}")).unwrap_or_default();
-            let (tag_text, tag_style) = match &app.suggestions[idx] {
-                Some(s) if s.source == actng_core::Source::Exact => (s.tag.clone(), Style::default().fg(Color::Green)),
-                Some(s) => (s.tag.clone(), Style::default().fg(Color::Yellow)),
-                None => ("(review)".to_string(), Style::default().fg(Color::Red)),
-            };
+            let (tag_text, tag_style) = tag_display(&app.suggestions[idx]);
             let source = app.dataset.sources.get(app.dataset.source[idx]).map(|p| p.display().to_string()).unwrap_or_default();
             Row::new(vec![
                 Cell::from(date),
@@ -113,6 +106,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
 
 
-    let help = "/ search \u{b7} f cycle filter \u{b7} Enter retag \u{b7} j/k move";
+    let help = "/ search \u{b7} f cycle filter \u{b7} Enter retag \u{b7} x exception \u{b7} j/k move";
     frame.render_widget(Paragraph::new(help).style(Style::default().fg(Color::DarkGray)), chunks[2]);
+}
+
+/// Tag text and color for a suggestion, distinguishing override / exact /
+/// bayes / untagged so the Entries table doubles as an audit view.
+fn tag_display(suggestion: &Option<actng_core::Suggestion>) -> (String, Style) {
+    match suggestion {
+        Some(s) if s.source == actng_core::Source::Override => (s.tag.clone(), Style::default().fg(Color::Magenta)),
+        Some(s) if s.source == actng_core::Source::Exact => (s.tag.clone(), Style::default().fg(Color::Green)),
+        Some(s) => (s.tag.clone(), Style::default().fg(Color::Yellow)),
+        None => ("(review)".to_string(), Style::default().fg(Color::Red)),
+    }
 }

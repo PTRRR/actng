@@ -192,6 +192,34 @@ mod tests {
     }
 
     #[test]
+    fn overridden_entry_exports_with_its_pinned_tag_and_category() {
+        let dataset = dataset_with(
+            vec![Entry {
+                date: NaiveDate::from_ymd_opt(2025, 1, 1),
+                description: "COOP LAUSANNE".to_string(),
+                amount: Some(-10.0),
+                raw: vec![],
+            }],
+            "x.csv",
+        );
+        let mut profile = Profile::new("test");
+        profile.tags.push(Tag { name: "gift".to_string(), category: Some("presents".to_string()), description: None });
+        let entry = &dataset.entries[0];
+        profile.set_override(entry, "gift");
+
+        let suggestions: Vec<Option<Suggestion>> = dataset.entries.iter().map(|e| profile.suggest_entry(e)).collect();
+
+        let mut buf = Vec::new();
+        let summary = write_csv(&mut buf, &dataset, &profile, &suggestions).unwrap();
+
+        let mut rdr = csv::Reader::from_reader(buf.as_slice());
+        let record = rdr.records().next().unwrap().unwrap();
+        assert_eq!(&record[3], "gift");
+        assert_eq!(&record[4], "presents");
+        assert_eq!(summary.per_category, vec![("presents".to_string(), -10.0)]);
+    }
+
+    #[test]
     fn per_category_totals_match_hand_computed_sums() {
         let dataset = dataset_with(
             vec![

@@ -100,8 +100,9 @@ For every entry description:
 Design consequence: **entry→tag assignments are not stored separately.**
 Re-running the tagger over the same files reproduces every confirmed tag via
 the exact-match layer. The profile *is* the state. (Caveat: two entries with
-the same normalized key can only carry one tag — last confirmation wins.
-Acceptable for v1; revisit if amount-dependent tagging is ever needed.)
+the same normalized key can only carry one tag via this layer — last
+confirmation wins. See `SPEC-OVERRIDES.md` for the per-entry exception
+escape hatch that covers this case without training side effects.)
 
 ---
 

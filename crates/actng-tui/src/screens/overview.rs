@@ -18,7 +18,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 fn render_profile_card(app: &App, frame: &mut Frame, area: Rect) {
-    let (exact, bayes, review) = app.tagged_count();
+    let (exact, bayes, overrides, review) = app.tagged_count();
     let trained_keys: usize = app
         .profile
         .tagger
@@ -38,6 +38,7 @@ fn render_profile_card(app: &App, frame: &mut Frame, area: Rect) {
         Line::from(format!("entries:  {}", app.dataset.entries.len())),
         Line::from(format!("  exact:    {exact}")),
         Line::from(format!("  bayes:    {bayes}")),
+        Line::from(format!("  override: {overrides}")),
         Line::from(format!("  review:   {review}")),
         Line::from(format!("exact-match keys trained: {trained_keys}")),
         Line::from(""),

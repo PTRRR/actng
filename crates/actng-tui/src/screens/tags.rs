@@ -15,7 +15,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
 
     let names = sorted_tags(app);
     let stats = app.profile.tagger.stats();
-    let header = Row::new(vec!["Tag", "Category", "Trained", "Exact keys"]).style(Style::default().add_modifier(ratatui::style::Modifier::BOLD));
+    let header = Row::new(vec!["Tag", "Category", "Trained", "Exact keys", "Overrides"]).style(Style::default().add_modifier(ratatui::style::Modifier::BOLD));
 
     let rows: Vec<Row> = names
         .iter()
@@ -23,6 +23,7 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .map(|(i, name)| {
             let category = app.profile.tags.iter().find(|t| &t.name == name).and_then(|t| t.category.clone()).unwrap_or_else(|| "\u{2014}".to_string());
             let (trained, exact_keys) = stats.iter().find(|s| &s.tag == name).map(|s| (s.trained_docs, s.exact_keys)).unwrap_or((0, 0));
+            let overrides = app.profile.overrides.iter().filter(|o| &o.tag == name).count();
             let selected = i == app.tags_cursor;
             let style = if selected { Style::default().bg(Color::DarkGray) } else { Style::default() };
             Row::new(vec![
@@ -30,12 +31,19 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
                 Cell::from(category),
                 Cell::from(trained.to_string()),
                 Cell::from(exact_keys.to_string()),
+                Cell::from(overrides.to_string()),
             ])
             .style(style)
         })
         .collect();
 
-    let widths = [Constraint::Percentage(30), Constraint::Percentage(30), Constraint::Length(10), Constraint::Length(12)];
+    let widths = [
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Length(10),
+        Constraint::Length(12),
+        Constraint::Length(11),
+    ];
     let table = Table::new(rows, widths).header(header).block(titled_block(format!("Tags \u{2014} sort:{}", app.tags_sort.label())));
     frame.render_widget(table, chunks[0]);
 

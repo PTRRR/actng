@@ -26,37 +26,71 @@ pub fn persist_new_layouts(profile_path: &Path, profile: &mut Profile, imports: 
     Ok(())
 }
 
-/// Confirm `tag` for the entry at `entry_idx`. If the entry already carried a
+/// Confirm `tag` for the entry at `entry_idx` through the learning path. If
+/// the entry carries a per-entry exception, it's cleared first via
+/// `remove_override` — otherwise the stale override would silently shadow
+/// this new decision (SPEC-OVERRIDES.md §3). If the entry already carried a
 /// different exact-match tag (only possible in retag mode), that training
 /// data is cleanly removed first via `unlearn` so no stale Bayes weight is
 /// left behind — which also makes undo exact rather than approximate.
 /// Returns `None` if this is a no-op re-confirmation of the same tag.
 pub fn confirm_tag(app: &mut App, entry_idx: usize, tag: &str) -> Option<UndoRecord> {
-    let description = app.dataset.entries[entry_idx].description.clone();
+    let entry = app.dataset.entries[entry_idx].clone();
+    let description = entry.description.clone();
     let previous = app.profile.suggest(&description).filter(|s| s.source == Source::Exact).map(|s| s.tag);
 
-    if previous.as_deref() == Some(tag) {
+    if previous.as_deref() == Some(tag) && app.profile.override_for(&entry).is_none() {
         return None;
     }
+    app.profile.remove_override(&entry);
     if let Some(prev) = &previous {
         app.profile.unlearn(&description, prev);
     }
     app.profile.learn(&description, tag);
     app.recompute();
 
-    Some(UndoRecord { entry_idx, description, new_tag: tag.to_string(), previous_exact_tag: previous })
+    Some(UndoRecord::Learn { entry_idx, description, new_tag: tag.to_string(), previous_exact_tag: previous })
+}
+
+/// Pin `tag` to the entry at `entry_idx` as a per-entry exception. Replaces
+/// any previous override for the same entry without touching the tagger.
+/// Returns `None` if this is a no-op re-confirmation of the same tag.
+pub fn confirm_override(app: &mut App, entry_idx: usize, tag: &str) -> Option<UndoRecord> {
+    let entry = app.dataset.entries[entry_idx].clone();
+    let previous = app.profile.override_for(&entry).cloned();
+
+    if previous.as_ref().map(|o| o.tag.as_str()) == Some(tag) {
+        return None;
+    }
+    app.profile.set_override(&entry, tag);
+    app.recompute();
+
+    Some(UndoRecord::Override { entry_idx, previous })
 }
 
 /// Pop and reverse the most recent `UndoRecord`, returning the entry index
 /// it applied to so the caller can move the cursor back onto it.
 pub fn undo(app: &mut App) -> Option<usize> {
     let rec = app.undo.pop()?;
-    app.profile.unlearn(&rec.description, &rec.new_tag);
-    if let Some(prev) = rec.previous_exact_tag {
-        app.profile.learn(&rec.description, &prev);
-    }
+    let entry_idx = match rec {
+        UndoRecord::Learn { entry_idx, description, new_tag, previous_exact_tag } => {
+            app.profile.unlearn(&description, &new_tag);
+            if let Some(prev) = previous_exact_tag {
+                app.profile.learn(&description, &prev);
+            }
+            entry_idx
+        }
+        UndoRecord::Override { entry_idx, previous } => {
+            let entry = app.dataset.entries[entry_idx].clone();
+            app.profile.remove_override(&entry);
+            if let Some(prev) = previous {
+                app.profile.set_override(&entry, &prev.tag);
+            }
+            entry_idx
+        }
+    };
     app.recompute();
-    Some(rec.entry_idx)
+    Some(entry_idx)
 }
 
 /// One row of a `Picker`'s filtered list.
@@ -84,7 +118,7 @@ impl PickerItem {
 pub fn picker_items(app: &App, picker: &Picker) -> Vec<PickerItem> {
     let query = picker.query.trim();
     let mut rows: Vec<PickerItem> = match &picker.context {
-        PickerContext::Tag { .. } => {
+        PickerContext::Tag { .. } | PickerContext::Override { .. } => {
             let mut scored: Vec<(i32, PickerItem)> = app
                 .profile
                 .tags

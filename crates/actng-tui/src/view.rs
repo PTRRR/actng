@@ -40,18 +40,28 @@ pub fn view(app: &App, frame: &mut Frame) {
 }
 
 fn render_status_bar(app: &App, frame: &mut Frame, area: Rect) {
-    let (exact, bayes, review) = app.tagged_count();
+    let (exact, bayes, overrides, review) = app.tagged_count();
     let save_tick = if app.last_saved.is_some() { "\u{2713} saved" } else { "" };
+
+    let breakdown = if overrides > 0 {
+        format!(
+            "tagged {} ({} exact, {} bayes, {} ovr) \u{b7} review {} ",
+            exact + bayes + overrides,
+            exact,
+            bayes,
+            overrides,
+            review
+        )
+    } else {
+        format!("tagged {} ({} exact, {} bayes) \u{b7} review {} ", exact + bayes, exact, bayes, review)
+    };
 
     let mut spans = vec![
         Span::raw(format!(" {} ", app.profile.name)),
         Span::raw("\u{2502} "),
         Span::raw(format!("{} tags ", app.profile.tags.len())),
         Span::raw("\u{2502} "),
-        Span::styled(
-            format!("tagged {} ({} exact, {} bayes) \u{b7} review {} ", exact + bayes, exact, bayes, review),
-            Style::default().fg(Color::Cyan),
-        ),
+        Span::styled(breakdown, Style::default().fg(Color::Cyan)),
         Span::raw("\u{2502} "),
         Span::styled(save_tick, Style::default().fg(Color::Green)),
     ];

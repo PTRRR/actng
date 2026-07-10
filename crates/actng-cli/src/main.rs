@@ -62,6 +62,11 @@ enum Commands {
         #[command(subcommand)]
         action: TagAction,
     },
+    /// Manage per-entry tag exceptions (list, rm)
+    Overrides {
+        #[command(subcommand)]
+        action: OverrideAction,
+    },
     /// Export tagged dataset and summary
     Export {
         /// Override directory
@@ -99,6 +104,17 @@ enum TagAction {
     Category { tag: String, category: String },
     /// List all tags, categories, and trained counts
     List,
+}
+
+#[derive(Subcommand)]
+enum OverrideAction {
+    /// List every override: date, amount, description, tag
+    List,
+    /// Remove an override by the index `list` printed
+    Rm {
+        /// Index as printed by `overrides list`
+        index: usize,
+    },
 }
 
 /// Atomically save a profile to disk by writing to a temporary file then renaming.
@@ -217,6 +233,7 @@ fn run() -> anyhow::Result<ExitCode> {
             println!("Profile: {}", profile.name);
             println!("Version: {}", profile.version);
             println!("Tags: {}", profile.tags.len());
+            println!("Overrides: {}", profile.overrides.len());
             println!("Remembered Layouts: {}", profile.layouts.len());
             ExitCode::SUCCESS
         }
@@ -345,8 +362,13 @@ fn run() -> anyhow::Result<ExitCode> {
                 .iter()
                 .filter(|(_, s)| s.source == Source::Bayes)
                 .count();
+            let overrides = result
+                .tagged
+                .iter()
+                .filter(|(_, s)| s.source == Source::Override)
+                .count();
                 let summary = format!(
-                    "{} tagged ({exact} exact, {bayes} bayes), {} need review",
+                    "{} tagged ({exact} exact, {bayes} bayes, {overrides} override), {} need review",
                     result.tagged.len(),
                     result.review.len(),
                 );
@@ -415,6 +437,8 @@ fn run() -> anyhow::Result<ExitCode> {
                         .collect();
                     let new_tag_idx = options.len();
                     options.push("new tag…".to_string());
+                    let exception_idx = options.len();
+                    options.push("tag as exception…".to_string());
                     let skip_idx = options.len();
                     options.push("skip".to_string());
                     let quit_idx = options.len();
@@ -443,6 +467,18 @@ fn run() -> anyhow::Result<ExitCode> {
                         profile.learn(&item.entry.description, name);
                         save_profile_atomically(&profile_path, &profile)?;
                         println!("Tagged as: {name}");
+                    } else if selection == exception_idx {
+                        let name: String = dialoguer::Input::new()
+                            .with_prompt("Exception tag")
+                            .interact_text()?;
+                        let name = name.trim();
+                        if name.is_empty() {
+                            println!("Empty tag name, skipping.");
+                            continue;
+                        }
+                        profile.set_override(item.entry, name);
+                        save_profile_atomically(&profile_path, &profile)?;
+                        println!("Tagged as: {name} (exception)");
                     } else {
                         let tag = item.candidates[selection].0.clone();
                         profile.learn(&item.entry.description, &tag);
@@ -530,6 +566,36 @@ fn run() -> anyhow::Result<ExitCode> {
                 ExitCode::SUCCESS
             }
         },
+        Commands::Overrides { action } => match action {
+            OverrideAction::List => {
+                let profile = Profile::load(&profile_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to load profile: {}", e))?;
+                println!("{:<5} {:<12} {:<10} {:<30} Tag", "#", "Date", "Amount", "Description");
+                println!("{:-<75}", "");
+                for (i, ovr) in profile.overrides.iter().enumerate() {
+                    println!(
+                        "{:<5} {:<12} {:<10} {:<30} {}",
+                        i,
+                        ovr.date.map(|d| d.to_string()).unwrap_or_else(|| "unknown".to_string()),
+                        ovr.amount.map(|a| format!("{a:.2}")).unwrap_or_else(|| "unknown".to_string()),
+                        ovr.description.chars().take(28).collect::<String>(),
+                        ovr.tag,
+                    );
+                }
+                ExitCode::SUCCESS
+            }
+            OverrideAction::Rm { index } => {
+                let mut profile = Profile::load(&profile_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to load profile: {}", e))?;
+                if index >= profile.overrides.len() {
+                    anyhow::bail!("No override at index {index}");
+                }
+                let removed = profile.overrides.remove(index);
+                save_profile_atomically(&profile_path, &profile)?;
+                println!("Removed override: {} -> {}", removed.description, removed.tag);
+                ExitCode::SUCCESS
+            }
+        },
         Commands::Export {
             directory,
             output,
@@ -546,7 +612,7 @@ fn run() -> anyhow::Result<ExitCode> {
             let suggestions: Vec<Option<Suggestion>> = dataset
                 .entries
                 .iter()
-                .map(|e| profile.suggest(&e.description))
+                .map(|e| profile.suggest_entry(e))
                 .collect();
 
             let file = fs::File::create(&output)?;

@@ -142,6 +142,71 @@ fn tags_list_shows_trained_counts_and_rm_yes_removes_the_tag() {
 }
 
 #[test]
+fn override_is_tagged_separately_and_sibling_entry_is_unaffected() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("statement.csv"),
+        "Date,Description,Amount\n\
+         2025-01-01,COOP LAUSANNE,-12.50\n\
+         2025-01-02,COOP LAUSANNE,-8.00\n",
+    )
+    .unwrap();
+
+    actng()
+        .current_dir(&dir)
+        .args(["init", "--name", "test"])
+        .assert()
+        .success();
+
+    // Simulate a completed review session: the CLI's interactive
+    // "tag as exception…" prompt can't be scripted headlessly (see
+    // FIXES.md F10), so train/override the profile directly, matching the
+    // pattern used elsewhere in this file.
+    let profile_path = dir.path().join("actng.json");
+    let mut profile = actng_core::Profile::load(&profile_path).unwrap();
+    profile.learn("COOP LAUSANNE", "groceries");
+    let imports = actng_core::import_dir(dir.path(), &profile).unwrap();
+    let dataset = actng_core::collect(imports);
+    let overridden = dataset
+        .entries
+        .iter()
+        .find(|e| e.amount == Some(-12.50))
+        .unwrap();
+    profile.set_override(overridden, "gift");
+    profile.save(&profile_path).unwrap();
+
+    actng()
+        .current_dir(&dir)
+        .arg("tag")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 override"))
+        .stdout(predicate::str::contains("gift"))
+        .stdout(predicate::str::contains("groceries"));
+
+    actng()
+        .current_dir(&dir)
+        .args(["overrides", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gift"))
+        .stdout(predicate::str::contains("COOP LAUSANNE"));
+
+    actng()
+        .current_dir(&dir)
+        .args(["overrides", "rm", "0"])
+        .assert()
+        .success();
+
+    actng()
+        .current_dir(&dir)
+        .args(["overrides", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("gift").not());
+}
+
+#[test]
 fn export_writes_quoted_csv_with_all_columns_including_untagged_rows() {
     let dir = tempfile::tempdir().unwrap();
     write_fixture(dir.path());

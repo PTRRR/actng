@@ -48,6 +48,8 @@ impl Screen {
 pub enum PickerContext {
     /// Confirm a tag for `entry_idx` (used by both Review and Entries retag).
     Tag { entry_idx: usize },
+    /// Pin `entry_idx` to a tag as a per-entry exception, bypassing training.
+    Override { entry_idx: usize },
     /// Set `tag`'s category, picking from existing categories or a new one.
     Category { tag: String },
 }
@@ -128,13 +130,24 @@ impl Toast {
 
 /// One reversible training step, enough to undo a Review/Entries confirmation.
 #[derive(Debug, Clone)]
-pub struct UndoRecord {
-    pub entry_idx: usize,
-    pub description: String,
-    pub new_tag: String,
-    /// The exact-match tag this confirmation overwrote, if the entry already
-    /// had one (only possible in retag mode) and it differed from `new_tag`.
-    pub previous_exact_tag: Option<String>,
+pub enum UndoRecord {
+    /// A `learn` confirmation (from the tag picker or a digit shortcut).
+    Learn {
+        entry_idx: usize,
+        description: String,
+        new_tag: String,
+        /// The exact-match tag this confirmation overwrote, if the entry
+        /// already had one (only possible in retag mode) and it differed
+        /// from `new_tag`.
+        previous_exact_tag: Option<String>,
+    },
+    /// A `set_override` confirmation (the exception picker).
+    Override {
+        entry_idx: usize,
+        /// The override this confirmation replaced, if any, so undo can
+        /// restore it instead of just clearing the entry.
+        previous: Option<actng_core::Override>,
+    },
 }
 
 /// Sort order for the Tags screen.
@@ -169,6 +182,7 @@ pub enum EntryFilter {
     All,
     Tagged,
     Review,
+    Overridden,
     Tag(String),
 }
 
@@ -280,7 +294,7 @@ impl App {
     /// queue and every screen stay perfectly consistent with no cache to
     /// invalidate.
     pub fn recompute(&mut self) {
-        self.suggestions = self.dataset.entries.iter().map(|e| self.profile.suggest(&e.description)).collect();
+        self.suggestions = self.dataset.entries.iter().map(|e| self.profile.suggest_entry(e)).collect();
         let queue_len = self.review_queue().len();
         if self.review_cursor >= queue_len {
             self.review_cursor = queue_len.saturating_sub(1);
@@ -297,18 +311,21 @@ impl App {
         }
     }
 
-    pub fn tagged_count(&self) -> (usize, usize, usize) {
+    /// `(exact, bayes, override, review)` counts across every dataset entry.
+    pub fn tagged_count(&self) -> (usize, usize, usize, usize) {
         let mut exact = 0;
         let mut bayes = 0;
+        let mut overrides = 0;
         let mut review = 0;
         for s in &self.suggestions {
             match s {
+                Some(sugg) if sugg.source == actng_core::Source::Override => overrides += 1,
                 Some(sugg) if sugg.source == actng_core::Source::Exact => exact += 1,
                 Some(_) => bayes += 1,
                 None => review += 1,
             }
         }
-        (exact, bayes, review)
+        (exact, bayes, overrides, review)
     }
 
     pub fn set_toast(&mut self, message: impl Into<String>) {

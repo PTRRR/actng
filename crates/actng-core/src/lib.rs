@@ -51,5 +51,5 @@ pub use import::{
     read_entries_with_layouts, Encoding, Import, ImportProfile,
 };
 pub use normalize::{normalize, Normalized};
-pub use profile::{Profile, Tag, CURRENT_VERSION};
+pub use profile::{Override, Profile, Tag, CURRENT_VERSION};
 pub use tagger::{Source, Suggestion, TagStats, Tagger};
