@@ -4,7 +4,7 @@ use std::time::Duration;
 use crate::actions::{self, picker_items};
 use crate::app::{
     App, Cmd, Confirm, ConfirmContext, EntryFilter, ExportField, ExportForm, Modal, Msg, Picker,
-    PickerContext, Screen, TagSort, TextPrompt, TextPromptPurpose, UndoRecord,
+    PickerContext, Screen, TagSort, TextPrompt, TextPromptPurpose,
 };
 
 const TOAST_LIFETIME: Duration = Duration::from_secs(3);
@@ -214,7 +214,8 @@ fn handle_entries_key(app: &mut App, key: KeyEvent) -> Vec<Cmd> {
 }
 
 fn next_entry_filter(app: &App) -> EntryFilter {
-    let tags: Vec<String> = app.profile.tags.iter().map(|t| t.name.clone()).collect();
+    let mut tags: Vec<String> = app.profile.tags.iter().map(|t| t.name.clone()).collect();
+    tags.sort();
     match &app.entries_filter {
         EntryFilter::All => EntryFilter::Tagged,
         EntryFilter::Tagged => EntryFilter::Review,
@@ -588,6 +589,7 @@ mod tests {
     use crossterm::event::KeyModifiers;
 
     use super::*;
+    use crate::app::UndoRecord;
 
     fn entry(desc: &str, amount: f64) -> Entry {
         Entry {
